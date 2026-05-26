@@ -550,9 +550,12 @@ export default function Evaluation() {
                 title="ROC Curves"
                 subtitle="Receiver Operating Characteristic — higher curve = better discrimination"
               >
-                <ChartPlot style={{ height: 260 }}>
+                <ChartPlot style={{ height: 400 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={rocData} margin={chartMargin.labeledLeft}>
+                    <AreaChart
+                      data={rocData}
+                      margin={{ ...chartMargin.labeledLeft, bottom: 80 }}
+                    >
                       <CartesianGrid {...cartesianGrid(theme)} />
                       <XAxis
                         dataKey="fpr"
@@ -570,15 +573,10 @@ export default function Evaluation() {
                       <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} strokeWidth={2} fill={theme.series.trainFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.championHold} />
                       <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} strokeWidth={2} fill={theme.series.devFill} fillOpacity={0.25} dot={false} name={EVALUATION_SERIES.championOos} />
                       <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} strokeWidth={2} fill={theme.series.newFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.recalibratedOos} />
-                      <Legend {...chartLegendProps(theme, chartLegend)} />
+                      <Legend {...chartLegendProps(theme, { ...chartLegend, height: 48 })} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartPlot>
-                <div className="flex flex-wrap gap-4 justify-center text-[10px] text-muted-foreground mt-2">
-                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.train }} />{EVALUATION_SERIES.championHold} (AUC: {cohortFromReport(report, "champion_hold", "auc", "champion_hold_auc").toFixed(4)})</span>
-                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.dev }} />{EVALUATION_SERIES.championOos} (AUC: {cohortFromReport(report, "champion_oos", "auc", "orig_auc").toFixed(4)})</span>
-                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.new }} />{EVALUATION_SERIES.recalibratedOos} (AUC: {cohortFromReport(report, "recalibrated_oos", "auc", "new_auc").toFixed(4)})</span>
-                </div>
               </ChartCard>
             )}
           </div>
