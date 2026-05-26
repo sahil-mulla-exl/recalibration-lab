@@ -1,0 +1,690 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
+import { motion } from "framer-motion";
+import { ArrowRight, ArrowLeft, Award, Target, ShieldAlert, ShieldCheck, AlertTriangle } from "lucide-react";
+import { runAgent } from "@/services/api";
+import { SHOW_POLICY_GUARDRAILS } from "@/config/uiVisibility";
+import { usePersistedState, useSession } from "@/contexts/session";
+import { ChartCard, ChartPlot } from "@/components/charts";
+import {
+  axisLabel,
+  axisTick,
+  cartesianGrid,
+  chartLegendProps,
+  chartMargin,
+  chartTooltipProps,
+  useChartTheme,
+} from "@/lib/chartTheme";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { AgentStepper } from "@/components/AgentStepper";
+import {
+  EvaluationMetricsTable,
+  type EvaluationMetricRow,
+} from "@/components/evaluation/EvaluationMetricsTable";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  EVALUATION_DATA_KEYS,
+  EVALUATION_SERIES,
+  evaluationChartLabel,
+} from "@/config/evaluation";
+import { buildEvaluationRadarRows, type RadarChartRow } from "@/lib/evaluationRadar";
+import type { ChartTheme } from "@/lib/chartTheme";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, Legend, ReferenceLine,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from "recharts";
+
+type EvaluationCohortKey = "champion_hold" | "champion_oos" | "recalibrated_oos";
+
+function cohortFromReport(
+  report: Record<string, unknown>,
+  cohort: EvaluationCohortKey,
+  field: string,
+  legacy?: string,
+): number {
+  const cohorts = report.evaluation_cohorts as Record<string, Record<string, unknown>> | undefined;
+  const nested = cohorts?.[cohort]?.[field];
+  if (nested != null && nested !== "") return Number(nested);
+  if (legacy) return Number(report[legacy] ?? 0);
+  return 0;
+}
+
+function EvaluationRadarTooltip({
+  active,
+  payload,
+  theme,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: RadarChartRow }>;
+  theme: ChartTheme;
+}) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+
+  const rows = [
+    { label: EVALUATION_SERIES.championHold, raw: row.rawHold, norm: row.championHold, color: theme.series.train },
+    { label: EVALUATION_SERIES.championOos, raw: row.rawOos, norm: row.championOos, color: theme.series.dev },
+    { label: EVALUATION_SERIES.recalibratedOos, raw: row.rawRecal, norm: row.recalibratedOos, color: theme.series.new },
+  ];
+
+  return (
+    <div
+      className="rounded-lg border px-3 py-2 text-xs shadow-md"
+      style={{
+        background: theme.tooltip.contentStyle.backgroundColor,
+        borderColor: theme.tooltip.contentStyle.border,
+        color: theme.tooltip.contentStyle.color,
+      }}
+    >
+      <p className="font-semibold mb-1.5">{row.axis}</p>
+      {rows.map((r) => (
+        <p key={r.label} className="flex items-center justify-between gap-4 tabular-nums">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+            <span className="truncate max-w-[12rem]">{r.label}</span>
+          </span>
+          <span>
+            {row.format(r.raw)}
+            <span className="text-muted-foreground ml-1">({r.norm.toFixed(0)}/100)</span>
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// ── Recommendation banner ───────────────────────────────────────────────────
+function RecommendBanner({
+  report,
+  problemType,
+}: {
+  report: Record<string, unknown>;
+  problemType: "classification" | "regression";
+}) {
+  const aucDelta = Number(report.new_auc || 0) - Number(report.orig_auc || 0);
+  const rmseDelta = Number(report.orig_rmse || 0) - Number(report.new_rmse || 0);
+  const deploy = problemType === "regression" ? rmseDelta > 0 : aucDelta > 0.005;
+  return (
+    <div className={`rounded-2xl border overflow-hidden ${deploy ? "border-emerald-500/35 bg-gradient-to-r from-emerald-500/10 to-transparent" : "border-yellow-500/30 bg-gradient-to-r from-yellow-500/8 to-transparent"}`}>
+      <div className="flex items-center gap-4 p-4">
+        <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${deploy ? "bg-emerald-500/20" : "bg-yellow-500/15"}`}>
+          {deploy ? <Award className="h-6 w-6 text-emerald-700 dark:text-emerald-400" /> : <Target className="h-6 w-6 text-amber-700 dark:text-yellow-400" />}
+        </div>
+        <div className="flex-1">
+          <p className={`text-base font-bold ${deploy ? "text-emerald-800 dark:text-emerald-400" : "text-amber-800 dark:text-yellow-400"}`}>
+            {deploy ? "Recommend Deployment" : "Marginal Improvement — Review Carefully"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {problemType === "regression"
+              ? deploy
+                ? `Recalibrated RMSE improved by ${rmseDelta.toFixed(4)} with R2 ${Number(report.new_r2 || 0).toFixed(4)}.`
+                : `Regression gain is marginal (RMSE Δ ${rmseDelta.toFixed(4)}). Validate on additional holdouts.`
+              : deploy
+                ? `Recalibrated AUC +${(aucDelta * 100).toFixed(2)} pp above champion. Jaccard overlap: ${(Number(report.jaccard) * 100).toFixed(1)}%.`
+                : `AUC improvement on ${EVALUATION_SERIES.recalibratedOos} is below threshold (${(aucDelta * 100).toFixed(2)} pp). Validate on additional holdouts.`}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type GuardrailRule = {
+  id: string;
+  description: string;
+  actual: string;
+  threshold: string;
+  severity: "critical" | "warning";
+  status: "pass" | "warn" | "fail";
+};
+
+type Guardrails = {
+  status: "pass" | "warn" | "block";
+  failed_rules: GuardrailRule[];
+  warning_rules: GuardrailRule[];
+  passed_rules: GuardrailRule[];
+  override_allowed: boolean;
+  required_approvers: string[];
+};
+
+function PolicyGuardrailsCard({ guardrails }: { guardrails: Guardrails | null }) {
+  if (!guardrails) return null;
+  const statusClass =
+    guardrails.status === "pass"
+      ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-400"
+      : guardrails.status === "warn"
+        ? "border-yellow-500/25 bg-yellow-500/8 text-yellow-400"
+        : "border-rose-500/25 bg-rose-500/8 text-rose-400";
+  const StatusIcon = guardrails.status === "pass" ? ShieldCheck : guardrails.status === "warn" ? AlertTriangle : ShieldAlert;
+  const renderRule = (rule: GuardrailRule) => (
+    <div key={rule.id} className="rounded-md border border-border bg-card px-3 py-2 text-xs">
+      <p className="font-medium">{rule.description}</p>
+      <p className="text-muted-foreground mt-0.5">
+        Actual: <span className="font-mono">{rule.actual}</span> | Threshold: <span className="font-mono">{rule.threshold}</span>
+      </p>
+    </div>
+  );
+  return (
+    <Card className="p-5">
+      <div className={`rounded-lg border px-3 py-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider ${statusClass}`}>
+        <StatusIcon className="h-4 w-4" />
+        Policy Guardrails: {guardrails.status}
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        Automatic promotion control across performance, drift stability, and governance checks.
+      </p>
+      {!!guardrails.failed_rules.length && (
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-semibold text-rose-400">Blocking violations ({guardrails.failed_rules.length})</p>
+          {guardrails.failed_rules.map(renderRule)}
+        </div>
+      )}
+      {!!guardrails.warning_rules.length && (
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-semibold text-yellow-400">Warnings ({guardrails.warning_rules.length})</p>
+          {guardrails.warning_rules.map(renderRule)}
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground mt-3">
+        Required approvers: {guardrails.required_approvers.join(", ")}
+      </p>
+    </Card>
+  );
+}
+
+// ── Main page ───────────────────────────────────────────────────────────────
+export default function Evaluation() {
+  const [, navigate] = useLocation();
+  const { sessionId, setStep, setEvaluationResult, evaluationResult, selectedModel } = useSession();
+  const [inventoryConfigs] = usePersistedState<Record<string, string[]>>("rcl:inventoryConfigs", {});
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(!!evaluationResult);
+  const [report, setReport] = useState<Record<string, unknown> | null>(evaluationResult);
+  const [guardrailOverride, setGuardrailOverride] = useState(false);
+  const autoStartedRef = useRef(false);
+  const theme = useChartTheme();
+  // Always prefer currently selected model type to avoid stale report rendering.
+  const problemType = String(selectedModel?.problem_type || report?.problem_type || "classification")
+    .toLowerCase()
+    .startsWith("reg")
+    ? "regression"
+    : "classification";
+
+  const startAgent = async () => {
+    if (!sessionId) return;
+    setRunning(true);
+    setDone(false);
+    await runAgent(sessionId, "evaluation");
+  };
+
+  useEffect(() => {
+    if (!sessionId || running || done || !!report || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    setReport(null);
+    setDone(false);
+    void startAgent();
+  }, [sessionId, running, done, report]);
+
+  const handleCompleted = (r: unknown) => {
+    const rep = r as Record<string, unknown>;
+    setReport(rep);
+    setEvaluationResult(rep);
+    setRunning(false);
+    setDone(true);
+  };
+
+  const holdLift = (report?.champion_hold_lift_table || report?.orig_lift_table || []) as Array<{
+    decile: number;
+    lift: number;
+  }>;
+  const championOosLift = (report?.orig_lift_table || []) as Array<{ decile: number; lift: number }>;
+  const recalOosLift = (report?.new_lift_table || []) as Array<{ decile: number; lift: number }>;
+  const liftRows = Math.max(holdLift.length, championOosLift.length, recalOosLift.length);
+  const liftData = Array.from({ length: liftRows }).map((_, i) => ({
+    decile: `D${championOosLift[i]?.decile ?? holdLift[i]?.decile ?? i + 1}`,
+    [EVALUATION_DATA_KEYS.championHold]: Number((holdLift[i]?.lift ?? 0).toFixed(3)),
+    [EVALUATION_DATA_KEYS.championOos]: Number((championOosLift[i]?.lift ?? 0).toFixed(3)),
+    [EVALUATION_DATA_KEYS.recalibratedOos]: Number((recalOosLift[i]?.lift ?? 0).toFixed(3)),
+  }));
+
+  const downsampleRoc = (roc?: { fpr: number[]; tpr: number[] }) => {
+    if (!roc?.fpr?.length) return [] as Array<{ fpr: number; tpr: number }>;
+    const step = Math.max(1, Math.floor(roc.fpr.length / 50));
+    return roc.fpr
+      .filter((_, i) => i % step === 0)
+      .map((fpr, idx) => ({
+        fpr: Number(fpr.toFixed(3)),
+        tpr: Number((roc.tpr[idx * step] ?? 0).toFixed(3)),
+      }));
+  };
+  const holdRocPts = downsampleRoc(report?.champion_hold_roc as { fpr: number[]; tpr: number[] } | undefined);
+  const championOosRocPts = downsampleRoc(report?.orig_roc as { fpr: number[]; tpr: number[] } | undefined);
+  const recalOosRocPts = downsampleRoc(report?.new_roc as { fpr: number[]; tpr: number[] } | undefined);
+  const rocLen = Math.max(holdRocPts.length, championOosRocPts.length, recalOosRocPts.length);
+  const rocData = Array.from({ length: rocLen }).map((_, i) => ({
+    fpr: Number((championOosRocPts[i]?.fpr ?? holdRocPts[i]?.fpr ?? recalOosRocPts[i]?.fpr ?? 0).toFixed(3)),
+    [EVALUATION_DATA_KEYS.championHold]: holdRocPts[i]?.tpr ?? 0,
+    [EVALUATION_DATA_KEYS.championOos]: championOosRocPts[i]?.tpr ?? 0,
+    [EVALUATION_DATA_KEYS.recalibratedOos]: recalOosRocPts[i]?.tpr ?? 0,
+  }));
+
+  const impTable = ((report?.importance_table || []) as Array<{ feature: string; orig_importance: number; new_importance: number }>)
+    .slice(0, 10);
+  const selectedModelId = selectedModel?.model_id || "";
+  const selectedConfigs = new Set(inventoryConfigs[selectedModelId] || []);
+  const showAuc = selectedConfigs.has("AUC");
+  const showKs = selectedConfigs.has("KS");
+  const showGini = selectedConfigs.has("GINI");
+  const showCalibration = selectedConfigs.has("Calibration");
+  const showLift = selectedConfigs.has("Lift/Gains");
+  const showFeatureImportance = selectedConfigs.has("Feature Importance");
+  const showRmse = selectedConfigs.has("RMSE");
+  const showMae = selectedConfigs.has("MAE");
+  const showR2 = selectedConfigs.has("R2");
+  const hasRegressionMetrics = showRmse || showMae || showR2;
+  const hasClassificationMetrics =
+    showAuc || showKs || showGini || showCalibration || showLift || showFeatureImportance;
+  const showMetricsForProblem = problemType === "regression" ? hasRegressionMetrics : hasClassificationMetrics;
+  const evaluationMetricRows = useMemo((): EvaluationMetricRow[] => {
+    if (!report) return [];
+    const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
+      cohortFromReport(report, cohort, field, legacy);
+    const rows: EvaluationMetricRow[] = [];
+
+    if (problemType === "regression") {
+      if (showRmse) {
+        rows.push({
+          metric: "RMSE",
+          hold: m("champion_hold", "rmse", "champion_hold_rmse"),
+          oos: m("champion_oos", "rmse", "orig_rmse"),
+          recal: m("recalibrated_oos", "rmse", "new_rmse"),
+          higherIsBetter: false,
+        });
+      }
+      if (showMae) {
+        rows.push({
+          metric: "MAE",
+          hold: m("champion_hold", "mae", "champion_hold_mae"),
+          oos: m("champion_oos", "mae", "orig_mae"),
+          recal: m("recalibrated_oos", "mae", "new_mae"),
+          higherIsBetter: false,
+        });
+      }
+      if (showR2) {
+        rows.push({
+          metric: "R²",
+          hold: m("champion_hold", "r2", "champion_hold_r2"),
+          oos: m("champion_oos", "r2", "orig_r2"),
+          recal: m("recalibrated_oos", "r2", "new_r2"),
+        });
+      }
+    } else {
+      if (showAuc) {
+        rows.push({
+          metric: "AUC",
+          hold: m("champion_hold", "auc", "champion_hold_auc"),
+          oos: m("champion_oos", "auc", "orig_auc"),
+          recal: m("recalibrated_oos", "auc", "new_auc"),
+        });
+      }
+      if (showKs) {
+        rows.push({
+          metric: "KS Statistic",
+          hold: m("champion_hold", "ks", "champion_hold_ks"),
+          oos: m("champion_oos", "ks", "orig_ks"),
+          recal: m("recalibrated_oos", "ks", "new_ks"),
+        });
+      }
+      if (showGini) {
+        rows.push({
+          metric: "Gini Coefficient",
+          hold: m("champion_hold", "gini", "champion_hold_gini"),
+          oos: m("champion_oos", "gini", "orig_gini"),
+          recal: m("recalibrated_oos", "gini", "new_gini"),
+        });
+      }
+      if (showCalibration) {
+        rows.push({
+          metric: "Calibration Error",
+          hold: m("champion_hold", "cal_error", "champion_hold_cal_error"),
+          oos: m("champion_oos", "cal_error", "orig_cal_error"),
+          recal: m("recalibrated_oos", "cal_error", "new_cal_error"),
+          higherIsBetter: false,
+          format: (v) => `${v.toFixed(2)}%`,
+        });
+      }
+      if (showLift) {
+        rows.push({
+          metric: "Top-Decile Lift",
+          hold: m("champion_hold", "top_decile_lift", "top_decile_lift_champion_hold"),
+          oos: m("champion_oos", "top_decile_lift", "top_decile_lift_orig"),
+          recal: m("recalibrated_oos", "top_decile_lift", "top_decile_lift_new"),
+          format: (v) => `${v.toFixed(3)}x`,
+        });
+      }
+    }
+
+    return rows;
+  }, [
+    report,
+    problemType,
+    showRmse,
+    showMae,
+    showR2,
+    showAuc,
+    showKs,
+    showGini,
+    showCalibration,
+    showLift,
+  ]);
+
+  const chartLegend = { formatter: (value: string) => evaluationChartLabel(value) };
+
+  const radarData = useMemo(() => {
+    if (!report || !showMetricsForProblem) return [] as RadarChartRow[];
+    const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
+      cohortFromReport(report, cohort, field, legacy);
+
+    const specs =
+      problemType === "regression"
+        ? [
+            ...(showR2
+              ? [{ axis: "R2", hold: m("champion_hold", "r2", "champion_hold_r2"), oos: m("champion_oos", "r2", "orig_r2"), recal: m("recalibrated_oos", "r2", "new_r2"), higherIsBetter: true as const }]
+              : []),
+            ...(showRmse
+              ? [{ axis: "RMSE", hold: m("champion_hold", "rmse", "champion_hold_rmse"), oos: m("champion_oos", "rmse", "orig_rmse"), recal: m("recalibrated_oos", "rmse", "new_rmse"), higherIsBetter: false as const }]
+              : []),
+            ...(showMae
+              ? [{ axis: "MAE", hold: m("champion_hold", "mae", "champion_hold_mae"), oos: m("champion_oos", "mae", "orig_mae"), recal: m("recalibrated_oos", "mae", "new_mae"), higherIsBetter: false as const }]
+              : []),
+          ]
+        : [
+            ...(showAuc
+              ? [{ axis: "AUC", hold: m("champion_hold", "auc", "champion_hold_auc"), oos: m("champion_oos", "auc", "orig_auc"), recal: m("recalibrated_oos", "auc", "new_auc"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              : []),
+            ...(showKs
+              ? [{ axis: "KS", hold: m("champion_hold", "ks", "champion_hold_ks"), oos: m("champion_oos", "ks", "orig_ks"), recal: m("recalibrated_oos", "ks", "new_ks"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              : []),
+            ...(showGini
+              ? [{ axis: "Gini", hold: m("champion_hold", "gini", "champion_hold_gini"), oos: m("champion_oos", "gini", "orig_gini"), recal: m("recalibrated_oos", "gini", "new_gini"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              : []),
+            ...(showLift
+              ? [{
+                  axis: "Top Lift",
+                  hold: m("champion_hold", "top_decile_lift", "top_decile_lift_champion_hold"),
+                  oos: m("champion_oos", "top_decile_lift", "top_decile_lift_orig"),
+                  recal: m("recalibrated_oos", "top_decile_lift", "top_decile_lift_new"),
+                  higherIsBetter: true as const,
+                  format: (v: number) => `${v.toFixed(3)}x`,
+                }]
+              : []),
+            ...(showCalibration
+              ? [{
+                  axis: "Calibration",
+                  hold: m("champion_hold", "cal_error", "champion_hold_cal_error"),
+                  oos: m("champion_oos", "cal_error", "orig_cal_error"),
+                  recal: m("recalibrated_oos", "cal_error", "new_cal_error"),
+                  higherIsBetter: false as const,
+                  format: (v: number) => `${v.toFixed(2)}%`,
+                }]
+              : []),
+          ];
+
+    return buildEvaluationRadarRows(specs);
+  }, [report, showMetricsForProblem, problemType, showAuc, showKs, showGini, showLift, showCalibration, showRmse, showMae, showR2]);
+
+  const guardrails = (report?.policy_guardrails || null) as Guardrails | null;
+  const guardrailStatus = guardrails?.status || "pass";
+  const isBlocked = guardrailStatus === "block";
+  const isWarnWithoutOverride = guardrailStatus === "warn" && !guardrailOverride;
+
+  return (
+    <div className="space-y-6 overflow-x-hidden">
+      <div>
+        <Button variant="ghost" size="sm" className="text-muted-foreground mb-3 -ml-1" onClick={() => navigate("/recalibration")}>
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />Back
+        </Button>
+        <h1 className="text-2xl font-bold">Model Evaluation</h1>
+      </div>
+
+      {running && !done && sessionId && (
+        <Card className="p-5">
+          <h2 className="font-semibold text-sm mb-4">Evaluation Agent</h2>
+          <AgentStepper
+            sessionId={sessionId}
+            agent="evaluation"
+            onCompleted={handleCompleted}
+            onFailed={() => setRunning(false)}
+          />
+        </Card>
+      )}
+
+      {done && report && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+
+          <RecommendBanner report={report} problemType={problemType} />
+          {SHOW_POLICY_GUARDRAILS && <PolicyGuardrailsCard guardrails={guardrails} />}
+
+          {showMetricsForProblem ? (
+            <EvaluationMetricsTable rows={evaluationMetricRows} />
+          ) : (
+            <Card className="p-4 border-orange-300 bg-orange-50 dark:border-orange-500/30 dark:bg-orange-500/5">
+              <p className="text-xs text-orange-800 dark:text-orange-300">
+                No evaluation metrics are selected for this model in Inventory. Select performance metrics and rerun.
+              </p>
+            </Card>
+          )}
+
+          <div className={`grid grid-cols-1 ${problemType === "classification" && rocData.length > 0 ? "xl:grid-cols-2" : ""} gap-4`}>
+            {radarData.length > 0 && (
+                <ChartCard
+                  title="Multi-Metric Radar"
+                  subtitle="Each axis scales 0–100 from the max of all three cohorts on that metric (hover for raw values)."
+                >
+                  <ChartPlot style={{ height: 320 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={radarData} outerRadius="72%">
+                        <PolarGrid stroke={theme.radar.grid} />
+                        <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: theme.axis }} />
+                        <PolarRadiusAxis
+                          angle={90}
+                          domain={[0, 100]}
+                          tick={{ fontSize: 9, fill: theme.axis }}
+                          stroke={theme.axisLine}
+                          label={axisLabel(theme, "Normalized score (0–100)", "insideLeft", { angle: -90, offset: 4 })}
+                        />
+                        <Radar
+                          name={EVALUATION_SERIES.championHold}
+                          dataKey={EVALUATION_DATA_KEYS.championHold}
+                          stroke={theme.series.train}
+                          fill={theme.series.trainFill}
+                          fillOpacity={0.15}
+                          strokeWidth={2}
+                        />
+                        <Radar
+                          name={EVALUATION_SERIES.championOos}
+                          dataKey={EVALUATION_DATA_KEYS.championOos}
+                          stroke={theme.series.dev}
+                          fill={theme.series.devFill}
+                          fillOpacity={0.15}
+                          strokeWidth={2}
+                        />
+                        <Radar
+                          name={EVALUATION_SERIES.recalibratedOos}
+                          dataKey={EVALUATION_DATA_KEYS.recalibratedOos}
+                          stroke={theme.series.new}
+                          fill={theme.series.newFill}
+                          fillOpacity={0.15}
+                          strokeWidth={2}
+                        />
+                        <Legend {...chartLegendProps(theme, chartLegend)} />
+                        <Tooltip
+                          cursor={false}
+                          content={(props) => (
+                            <EvaluationRadarTooltip
+                              active={props.active}
+                              payload={props.payload as Array<{ payload?: RadarChartRow }>}
+                              theme={theme}
+                            />
+                          )}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </ChartPlot>
+                </ChartCard>
+            )}
+
+            {/* ROC curves — area fill */}
+            {problemType === "classification" && showAuc && rocData.length > 0 && (
+              <ChartCard
+                title="ROC Curves"
+                subtitle="Receiver Operating Characteristic — higher curve = better discrimination"
+              >
+                <ChartPlot style={{ height: 260 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={rocData} margin={chartMargin.labeledLeft}>
+                      <CartesianGrid {...cartesianGrid(theme)} />
+                      <XAxis
+                        dataKey="fpr"
+                        tick={axisTick(theme)}
+                        stroke={theme.axisLine}
+                        label={axisLabel(theme, "False positive rate", "insideBottom", { offset: -4 })}
+                      />
+                      <YAxis
+                        tick={axisTick(theme)}
+                        stroke={theme.axisLine}
+                        label={axisLabel(theme, "True positive rate", "insideLeft", { angle: -90, offset: 8 })}
+                      />
+                      <Tooltip formatter={(v: number) => v.toFixed(3)} {...chartTooltipProps(theme, { cursor: "line" })} />
+                      <ReferenceLine x={1} y={1} stroke={theme.axisLine} strokeDasharray="4 4" />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} strokeWidth={2} fill={theme.series.trainFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.championHold} />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} strokeWidth={2} fill={theme.series.devFill} fillOpacity={0.25} dot={false} name={EVALUATION_SERIES.championOos} />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} strokeWidth={2} fill={theme.series.newFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.recalibratedOos} />
+                      <Legend {...chartLegendProps(theme, chartLegend)} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartPlot>
+                <div className="flex flex-wrap gap-4 justify-center text-[10px] text-muted-foreground mt-2">
+                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.train }} />{EVALUATION_SERIES.championHold} (AUC: {cohortFromReport(report, "champion_hold", "auc", "champion_hold_auc").toFixed(4)})</span>
+                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.dev }} />{EVALUATION_SERIES.championOos} (AUC: {cohortFromReport(report, "champion_oos", "auc", "orig_auc").toFixed(4)})</span>
+                  <span className="flex items-center gap-1.5"><span className="w-4 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.series.new }} />{EVALUATION_SERIES.recalibratedOos} (AUC: {cohortFromReport(report, "recalibrated_oos", "auc", "new_auc").toFixed(4)})</span>
+                </div>
+              </ChartCard>
+            )}
+          </div>
+
+          {/* Lift chart */}
+          {problemType === "classification" && showLift && liftData.length > 0 && (
+            <ChartCard
+              title="Cumulative Lift by Decile"
+              subtitle="How many more responders does each model capture vs. random?"
+            >
+              <ChartPlot style={{ height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={liftData} margin={chartMargin.labeledLeft} barGap={3}>
+                    <CartesianGrid {...cartesianGrid(theme)} />
+                    <XAxis
+                      dataKey="decile"
+                      tick={axisTick(theme)}
+                      stroke={theme.axisLine}
+                      label={axisLabel(theme, "Score decile", "insideBottom", { offset: -4 })}
+                    />
+                    <YAxis
+                      tick={axisTick(theme)}
+                      stroke={theme.axisLine}
+                      label={axisLabel(theme, "Lift (×)", "insideLeft", { angle: -90, offset: 8 })}
+                    />
+                    <Tooltip formatter={(v: number) => `${v.toFixed(3)}x`} {...chartTooltipProps(theme)} />
+                    <ReferenceLine y={1} stroke={theme.axisLine} strokeDasharray="4 4" label={{ value: "Baseline", fontSize: 9, fill: theme.axis }} />
+                    <Legend {...chartLegendProps(theme, chartLegend)} />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.championHold} />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.championOos} />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} fill={theme.series.newFill} stroke={theme.series.new} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.recalibratedOos} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartPlot>
+            </ChartCard>
+          )}
+
+          {/* Feature importance */}
+          {showFeatureImportance && impTable.length > 0 && (
+            <Card className="p-5">
+              <h3 className="font-semibold text-sm mb-1">Feature Importance (Top 10)</h3>
+              <p className="text-xs text-muted-foreground mb-4">
+                Model-level importance: {EVALUATION_SERIES.championOos} vs {EVALUATION_SERIES.recalibratedOos}
+              </p>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Feature</TableHead>
+                      <TableHead className="text-right">{EVALUATION_SERIES.championOos}</TableHead>
+                      <TableHead className="text-right">{EVALUATION_SERIES.recalibratedOos}</TableHead>
+                      <TableHead className="text-right">Δ (Recal − Champion)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {impTable.map((row) => {
+                      const delta = row.new_importance - row.orig_importance;
+                      return (
+                        <TableRow key={row.feature}>
+                          <TableCell className="font-medium">{row.feature}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{row.orig_importance.toFixed(4)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{row.new_importance.toFixed(4)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                            {delta >= 0 ? "+" : ""}
+                            {delta.toFixed(4)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          )}
+
+          <div className="flex justify-end">
+            {SHOW_POLICY_GUARDRAILS && guardrailStatus === "warn" && (
+              <Button
+                type="button"
+                variant={guardrailOverride ? "default" : "outline"}
+                className="mr-2"
+                onClick={() => setGuardrailOverride((v) => !v)}
+              >
+                {guardrailOverride ? "Override Enabled" : "Enable Risk Override"}
+              </Button>
+            )}
+            <Button
+              disabled={SHOW_POLICY_GUARDRAILS && (isBlocked || isWarnWithoutOverride)}
+              onClick={() => { setStep(6); navigate("/export"); }}
+              className="gap-2"
+            >
+              Proceed to Export <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+          {SHOW_POLICY_GUARDRAILS && isBlocked && (
+            <p className="text-xs text-rose-400 text-right">
+              Export promotion is blocked by critical guardrail violations. Resolve failed rules before proceeding.
+            </p>
+          )}
+          {SHOW_POLICY_GUARDRAILS && isWarnWithoutOverride && (
+            <p className="text-xs text-yellow-400 text-right">
+              Guardrail warnings detected. Enable override to proceed with explicit risk acceptance.
+            </p>
+          )}
+        </motion.div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,356 @@
+import os
+import json
+import pandas as pd
+from fastapi import APIRouter, Query
+from fastapi.responses import FileResponse, Response
+from backend.app.utils.session import get_session, session_dir, update_session
+from backend.app.utils.export_scores import (
+    DEFAULT_REFERENCE_PREDICTIONS,
+    build_score_comparison,
+    ensure_predicted_proba,
+)
+from backend.app.utils.data_io import read_tabular_dataframe
+from backend.app.utils.processed_paths import processed_csv_path, score_comparison_path
+
+router = APIRouter()
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+
+
+@router.get("/model")
+async def export_model(session_id: str = Query(...)):
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+    if (session.get("model_promotion_status") or "").lower() == "block":
+        return Response(
+            content="Model promotion blocked by policy guardrails. Resolve critical violations before export.",
+            status_code=403,
+        )
+    model_path = session.get("new_model_path")
+    if not model_path or not os.path.exists(model_path):
+        # Fall back to original model
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+        model_path = os.path.join(data_dir, "card_response_v2.3.pkl")
+    if not os.path.exists(model_path):
+        return Response(content="Model file not found", status_code=404)
+    return FileResponse(
+        model_path,
+        media_type="application/octet-stream",
+        filename="recalibrated_model.pkl",
+    )
+
+
+@router.get("/log")
+async def export_log(session_id: str = Query(...)):
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+    log_path = session.get("log_path")
+    if log_path and os.path.exists(log_path):
+        return FileResponse(log_path, media_type="application/json", filename="recalibration_log.json")
+
+    # Build a log from available session data
+    log = {
+        "session_id": session_id,
+        "model_id": session.get("model_id"),
+        "reproducibility": session.get("reproducibility_result"),
+        "drift": {k: v for k, v in (session.get("drift_result") or {}).items()
+                  if k not in ("variable_distributions", "dev_lift_table", "new_lift_table", "calibration_dev", "calibration_new")},
+        "recalibration": session.get("recalibration_result"),
+        "evaluation": {k: v for k, v in (session.get("evaluation_result") or session.get("comparison_result") or {}).items()
+                       if k not in ("migration_matrix", "migration_pct", "orig_roc", "new_roc", "orig_lift_table", "new_lift_table")},
+    }
+    return Response(
+        content=json.dumps(log, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=recalibration_log.json"},
+    )
+
+
+@router.get("/report")
+async def export_report(session_id: str = Query(...)):
+    """Generate a PDF summary report using reportlab."""
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        import io as _io
+
+        buffer = _io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
+        styles = getSampleStyleSheet()
+        story = []
+
+        title_style = ParagraphStyle("Title", parent=styles["Title"], fontSize=18, spaceAfter=12)
+        h2_style = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12, spaceAfter=6)
+        normal_style = styles["Normal"]
+
+        story.append(Paragraph("Recalibration Lab — Model Report", title_style))
+        story.append(Paragraph(f"Session: {session_id[:16]}...", normal_style))
+        story.append(Spacer(1, 0.5*cm))
+
+        # Model info
+        model_entry = session.get("model_entry") or {}
+        story.append(Paragraph("Model Information", h2_style))
+        model_data = [
+            ["Field", "Value"],
+            ["Model Name", model_entry.get("model_name", "—")],
+            ["Model ID", model_entry.get("model_id", "—")],
+            ["Class", model_entry.get("model_class", "—")],
+            ["Use Case", model_entry.get("use_case", "—")],
+        ]
+        t = Table(model_data, colWidths=[5*cm, 10*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A1F2E")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 0.5*cm))
+
+        # Drift summary
+        drift = session.get("drift_result") or {}
+        if drift:
+            story.append(Paragraph("Drift Diagnostics Summary", h2_style))
+            drift_data = [
+                ["Metric", "Value"],
+                ["Overall PSI", str(drift.get("overall_psi", "—"))],
+                ["Dev AUC", str(drift.get("orig_auc", "—"))],
+                ["New AUC", str(drift.get("new_auc", "—"))],
+                ["AUC Drop (pp)", str(drift.get("auc_drop_pp", "—"))],
+                ["Max Calibration Error", f"{drift.get('max_calibration_dev_pct', 0):.1f}%"],
+                ["Verdict", drift.get("verdict", "—").upper()],
+            ]
+            t2 = Table(drift_data, colWidths=[7*cm, 8*cm])
+            t2.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A1F2E")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+            ]))
+            story.append(t2)
+            story.append(Spacer(1, 0.5*cm))
+            story.append(Paragraph(f"Rationale: {drift.get('rationale', '')}", normal_style))
+            story.append(Spacer(1, 0.5*cm))
+
+        # Comparison summary
+        comp = session.get("evaluation_result") or session.get("comparison_result") or {}
+        if comp:
+            story.append(Paragraph("Model Evaluation (OOT)", h2_style))
+            comp_data = [
+                ["Metric", "Original", "Recalibrated"],
+                ["AUC", str(comp.get("orig_auc", "—")), str(comp.get("new_auc", "—"))],
+                ["KS Stat", str(comp.get("orig_ks", "—")), str(comp.get("new_ks", "—"))],
+                ["Gini", str(comp.get("orig_gini", "—")), str(comp.get("new_gini", "—"))],
+                ["Calibration Error", f"{comp.get('orig_cal_error', 0):.1f}%", f"{comp.get('new_cal_error', 0):.1f}%"],
+                ["Top-Decile Lift", str(comp.get("top_decile_lift_orig", "—")), str(comp.get("top_decile_lift_new", "—"))],
+            ]
+            t3 = Table(comp_data, colWidths=[6*cm, 4.5*cm, 4.5*cm])
+            t3.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A1F2E")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+            ]))
+            story.append(t3)
+
+        doc.build(story)
+        pdf_bytes = buffer.getvalue()
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=recalibration_report.pdf"},
+        )
+    except Exception as e:
+        return Response(content=f"PDF generation error: {e}", status_code=500)
+
+
+def _resolve_processed_path(session: dict, dataset: str) -> str | None:
+    if dataset == "dev":
+        return session.get("processed_dev_path")
+    if dataset == "new":
+        return session.get("processed_new_path")
+    if dataset == "oot":
+        return session.get("oot_scores_path")
+    if dataset == "hold":
+        return session.get("processed_hold_path")
+    return None
+
+
+@router.get("/processed-data")
+async def export_processed_data(
+    session_id: str = Query(...),
+    dataset: str = Query("dev", pattern="^(dev|new|hold|oot)$"),
+    format: str = Query("csv", pattern="^(csv|parquet)$"),
+):
+    """Export processed dataset with score and predicted_proba columns."""
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+
+    csv_key = {
+        "dev": "processed_dev_csv_path",
+        "new": "processed_new_csv_path",
+        "hold": "processed_hold_csv_path",
+        "oot": "oot_scores_csv_path",
+    }.get(dataset)
+    csv_on_disk = session.get(csv_key) if csv_key else None
+    if format == "csv" and csv_on_disk and os.path.exists(csv_on_disk):
+        return FileResponse(
+            csv_on_disk,
+            media_type="text/csv",
+            filename=os.path.basename(csv_on_disk),
+        )
+
+    path = _resolve_processed_path(session, dataset)
+    if not path or not os.path.exists(path):
+        fallback_csv = processed_csv_path(session_id, dataset)  # type: ignore[arg-type]
+        if format == "csv" and os.path.exists(fallback_csv):
+            return FileResponse(
+                fallback_csv,
+                media_type="text/csv",
+                filename=os.path.basename(fallback_csv),
+            )
+        return Response(content=f"Processed {dataset} data not found", status_code=404)
+
+    df = pd.read_parquet(path) if path.endswith(".parquet") else read_tabular_dataframe(path)
+    df = ensure_predicted_proba(df)
+
+    ext = "csv" if format == "csv" else "parquet"
+    out_path = processed_csv_path(session_id, dataset) if format == "csv" else path  # type: ignore[arg-type]
+    if format == "csv":
+        df.to_csv(out_path, index=False)
+        media = "text/csv"
+    else:
+        media = "application/octet-stream"
+
+    return FileResponse(
+        out_path,
+        media_type=media,
+        filename=os.path.basename(out_path),
+    )
+
+
+@router.get("/score-comparison-data")
+async def score_comparison_data(
+    session_id: str = Query(...),
+    dataset: str = Query("dev", pattern="^(dev|new)$"),
+    limit: int = Query(200, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+):
+    """Return paginated rows from the session score comparison CSV plus summary stats."""
+    session = get_session(session_id)
+    if not session:
+        return {"error": "Session not found"}
+
+    repro = session.get("reproducibility_result") or {}
+    path = (
+        session.get(f"score_comparison_{dataset}_path")
+        or repro.get("score_comparison_path")
+        or score_comparison_path(session_id, dataset)
+    )
+    if not path or not os.path.exists(path):
+        return {
+            "error": "Score comparison file not found",
+            "path": path,
+            "summary": repro.get("score_comparison_summary") or session.get(f"score_comparison_{dataset}_summary"),
+        }
+
+    df = pd.read_csv(path)
+    total_rows = int(len(df))
+    slice_df = df.iloc[offset : offset + limit]
+    columns = [str(c) for c in slice_df.columns.tolist()]
+    rows = json.loads(slice_df.to_json(orient="records", date_format="iso"))
+
+    summary = (
+        repro.get("score_comparison_summary")
+        or session.get(f"score_comparison_{dataset}_summary")
+        or {}
+    )
+
+    return {
+        "path": path,
+        "filename": os.path.basename(path),
+        "columns": columns,
+        "rows": rows,
+        "total_rows": total_rows,
+        "offset": offset,
+        "limit": limit,
+        "summary": summary,
+    }
+
+
+@router.get("/score-comparison")
+async def export_score_comparison(
+    session_id: str = Query(...),
+    dataset: str = Query("dev", pattern="^(dev|new)$"),
+    reference_path: str | None = Query(default=None),
+):
+    """
+    Export merged comparison: platform score/predicted_proba vs reference predicted_proba.
+    """
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+
+    platform_path = _resolve_processed_path(session, dataset)
+    if not platform_path or not os.path.exists(platform_path):
+        return Response(content=f"Processed {dataset} data not found", status_code=404)
+
+    ref_path = (
+        reference_path
+        or session.get("reference_predictions_path")
+        or DEFAULT_REFERENCE_PREDICTIONS
+    )
+    if not os.path.exists(ref_path):
+        return Response(content=f"Reference predictions file not found: {ref_path}", status_code=404)
+
+    try:
+        comparison_df, summary = build_score_comparison(platform_path, ref_path)
+    except Exception as exc:
+        return Response(content=str(exc), status_code=400)
+
+    out_path = session.get("score_comparison_path") or score_comparison_path(session_id, dataset)
+    comparison_df.to_csv(out_path, index=False)
+
+    sess_dir = session_dir(session_id)
+    os.makedirs(sess_dir, exist_ok=True)
+    summary_path = os.path.join(sess_dir, f"score_comparison_{dataset}_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2)
+
+    update_session(session_id, {
+        f"score_comparison_{dataset}_path": out_path,
+        f"score_comparison_{dataset}_summary": summary,
+    })
+
+    return FileResponse(
+        out_path,
+        media_type="text/csv",
+        filename=f"score_comparison_{dataset}.csv",
+    )
+
+
+@router.post("/reference-predictions")
+async def set_reference_predictions(body: dict):
+    """Store path to external CSV with predicted_proba for comparison exports."""
+    session_id = body.get("session_id")
+    path = body.get("reference_path")
+    if not session_id or not path:
+        return {"error": "session_id and reference_path required"}
+    if not os.path.exists(path):
+        return {"error": f"File not found: {path}"}
+    update_session(session_id, {"reference_predictions_path": path})
+    return {"ok": True, "reference_predictions_path": path}

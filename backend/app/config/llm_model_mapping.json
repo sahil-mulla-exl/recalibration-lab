@@ -1,0 +1,35 @@
+{
+  "chat": {
+    "gpt-4.1-mini": {
+      "provider": "azure",
+      "model": "gpt-4.1-mini",
+      "tags": ["fast", "cheap"],
+      "gateway_model_id": "azure/gpt-4.1-mini"
+    },
+    "gpt-4.1": {
+      "provider": "azure",
+      "model": "gpt-4.1",
+      "tags": ["quality"],
+      "gateway_model_id": "azure/gpt-4.1"
+    },
+    "claude-haiku-4-5": {
+      "provider": "bedrock",
+      "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tags": ["fast", "cheap"],
+      "gateway_model_id": "bedrock/claude-haiku-4-5"
+    },
+    "claude-sonnet-4-5": {
+      "provider": "bedrock",
+      "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "tags": ["reasoning", "quality"],
+      "gateway_model_id": "bedrock/claude-sonnet-4-5"
+    }
+  },
+  "embedding": {
+    "text-embedding-3-small": {
+      "provider": "azure",
+      "model": "text-embedding-3-small",
+      "gateway_model_id": "azure/text-embedding-3-small"
+    }
+  }
+}

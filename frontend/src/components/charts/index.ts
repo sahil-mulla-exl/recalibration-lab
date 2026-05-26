@@ -1,0 +1,12 @@
+/** Shared chart shell aligned with Diagnostics agent UI. */
+export { ChartCard } from "@/components/diagnostics/ChartCard";
+export { ChartPlot } from "@/components/diagnostics/ChartPlot";
+export {
+  axisLabel,
+  axisTick,
+  cartesianGrid,
+  chartMargin,
+  useChartTheme,
+  type ChartTheme,
+} from "@/lib/chartTheme";
+export { chartLegendProps, chartTooltipProps, tooltipCursor } from "@/lib/chartTooltipProps";
