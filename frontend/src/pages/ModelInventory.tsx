@@ -23,7 +23,7 @@ function ClassBadge({ cls }: { cls: string }) {
     Logistic: "bg-blue-500/15 text-blue-400 border-blue-500/30",
   };
   return (
-    <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${colors[cls] || "bg-muted/40 text-muted-foreground border-border"}`}>
+    <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${colors[cls] || "bg-muted/40 text-muted-foreground border-border"}`}>
       {cls}
     </span>
   );
@@ -54,7 +54,7 @@ function OptimizationMethodBadge({ method }: { method?: string }) {
     grid: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
   };
   return (
-    <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${colors[normalized]}`}>
+    <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${colors[normalized]}`}>
       {OPTIMIZATION_METHOD_LABELS[normalized]}
     </span>
   );
@@ -91,7 +91,7 @@ function ConfigSelector({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 justify-between gap-2 w-full min-w-0">
+        <Button variant="outline" size="sm" className="h-8 justify-between gap-1.5 w-full min-w-0 text-xs px-2">
           <span className="truncate">
             {picked.length > 0 ? picked.join(", ") : "Select metrics"}
           </span>
@@ -246,7 +246,7 @@ export default function ModelInventory() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">Model Inventory</h1>
@@ -290,72 +290,77 @@ export default function ModelInventory() {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden"
+          className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden w-full max-w-full"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-sm border-collapse">
-              <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
-                <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[140px]">Model Name</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[110px]">Model ID</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[100px]">Problem Type</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[100px]">Model Class</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[130px]">Use Case</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[110px]">Owner</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[105px]">Deploy Date</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[150px]">Optimization</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[180px]">Configurations</th>
-                  <th className="px-3 py-2.5 font-medium whitespace-nowrap min-w-[90px]">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((model, rowIndex) => {
-                  const picked = selectedConfigs[model.model_id] || [];
-                  return (
-                    <tr
-                      key={model.model_id}
-                      className={`align-top border-t border-gray-200 dark:border-gray-700 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 ${
-                        rowIndex % 2 === 0 ? "bg-white dark:bg-gray-900" : "bg-gray-50 dark:bg-gray-800/50"
-                      }`}
-                    >
-                      <td className="px-3 py-2 break-words">{model.model_name}</td>
-                      <td className="px-3 py-2 font-mono text-xs break-all">{model.model_id}</td>
-                      <td className="px-3 py-2 break-words">{model.problem_type || "-"}</td>
-                      <td className="px-3 py-2">
-                        <ClassBadge cls={model.model_class || ""} />
-                      </td>
-                      <td className="px-3 py-2 break-words">{model.use_case || "-"}</td>
-                      <td className="px-3 py-2 break-words">{model.owner || "-"}</td>
-                      <td className="px-3 py-2 break-words whitespace-nowrap">{model.deployment_date || "-"}</td>
-                      <td className="px-3 py-2">
-                        <OptimizationMethodBadge method={model.optimization_method} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <ConfigSelector picked={picked} onToggle={(opt) => toggleConfig(model.model_id, opt)} />
-                        {picked.length > 0 && (
-                          <div className="mt-1 text-[10px] text-muted-foreground">
-                            Metrics: {picked.join(", ")}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Button
-                          size="sm"
-                          className="gap-1.5"
-                          disabled={selecting === model.model_id || picked.length === 0}
-                          onClick={() => handleSelect(model)}
-                          title={picked.length === 0 ? "Select at least one configuration metric first" : undefined}
-                        >
-                          {selecting === model.model_id ? "Initialising…" : "Start"}
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <table className="w-full table-fixed text-xs leading-snug border-collapse">
+            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
+              <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="w-[12%] px-2 py-2.5 font-medium">Model Name</th>
+                <th className="w-[9%] px-2 py-2.5 font-medium">Model ID</th>
+                <th className="w-[8%] px-1.5 py-2.5 font-medium">Problem</th>
+                <th className="w-[8%] px-1.5 py-2.5 font-medium">Class</th>
+                <th className="w-[11%] px-1.5 py-2.5 font-medium">Use Case</th>
+                <th className="w-[7%] px-1.5 py-2.5 font-medium">Owner</th>
+                <th className="w-[7%] px-1.5 py-2.5 font-medium">Deploy</th>
+                <th className="w-[10%] px-1.5 py-2.5 font-medium">Optimization</th>
+                <th className="w-[19%] px-2 py-2.5 font-medium">Configurations</th>
+                <th className="w-[9%] px-1.5 py-2.5 font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((model, rowIndex) => {
+                const picked = selectedConfigs[model.model_id] || [];
+                return (
+                  <tr
+                    key={model.model_id}
+                    className={`align-top border-t border-gray-200 dark:border-gray-700 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 ${
+                      rowIndex % 2 === 0 ? "bg-white dark:bg-gray-900" : "bg-gray-50 dark:bg-gray-800/50"
+                    }`}
+                  >
+                    <td className="px-2 py-2 truncate" title={model.model_name}>
+                      {model.model_name}
+                    </td>
+                    <td className="px-2 py-2 font-mono text-[11px] truncate" title={model.model_id}>
+                      {model.model_id}
+                    </td>
+                    <td className="px-1.5 py-2 truncate" title={model.problem_type || "-"}>
+                      {model.problem_type || "-"}
+                    </td>
+                    <td className="px-1.5 py-2">
+                      <ClassBadge cls={model.model_class || ""} />
+                    </td>
+                    <td className="px-1.5 py-2 truncate" title={model.use_case || "-"}>
+                      {model.use_case || "-"}
+                    </td>
+                    <td className="px-1.5 py-2 truncate" title={model.owner || "-"}>
+                      {model.owner || "-"}
+                    </td>
+                    <td className="px-1.5 py-2 truncate" title={model.deployment_date || "-"}>
+                      {model.deployment_date || "-"}
+                    </td>
+                    <td className="px-1.5 py-2">
+                      <OptimizationMethodBadge method={model.optimization_method} />
+                    </td>
+                    <td className="px-2 py-2 min-w-0">
+                      <ConfigSelector picked={picked} onToggle={(opt) => toggleConfig(model.model_id, opt)} />
+                    </td>
+                    <td className="px-1.5 py-2">
+                      <Button
+                        size="sm"
+                        className="h-8 gap-1 px-2.5 text-xs"
+                        disabled={selecting === model.model_id || picked.length === 0}
+                        onClick={() => handleSelect(model)}
+                        title={picked.length === 0 ? "Select at least one configuration metric first" : undefined}
+                      >
+                        {selecting === model.model_id ? "…" : "Start"}
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </motion.div>
       )}
     </div>
