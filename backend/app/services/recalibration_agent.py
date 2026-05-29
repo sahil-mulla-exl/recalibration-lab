@@ -21,6 +21,7 @@ from backend.app.utils.model_helpers import (
 from backend.app.utils.drift_metrics import compute_auc, compute_rmse, compute_mae, compute_r2
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.oot_data import load_oot_dataframe
+from backend.app.config.agent_task_labels import RECAL_SCORE_OOT
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +239,7 @@ class RecalibrationAgent(Agent):
             {"id": "setup_hp_search",       "name": "Set up hyperparameter search"},
             {"id": "run_hp_tuning",         "name": "Run hyperparameter tuning (30 trials)"},
             {"id": "train_final_model",     "name": "Train final model on best hyperparameters"},
-            {"id": "score_oot",             "name": "Score out-of-time holdout"},
+            {"id": "score_oot",             "name": RECAL_SCORE_OOT},
             {"id": "serialize_new_model",   "name": "Serialize new model object"},
         ])
 

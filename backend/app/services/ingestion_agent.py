@@ -1,7 +1,8 @@
 import asyncio
 import os
 import importlib.util
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+from backend.app.config.datasets import DEV_DATA, HOLD_DATA, NEW_DATA, NEW_VALIDATION
 from backend.app.services.base import Agent
 from backend.app.utils.session import get_session, update_session
 from backend.app.utils.data_io import read_tabular_dataframe
@@ -14,17 +15,24 @@ from backend.app.utils.model_helpers import (
     extract_model_metadata,
     resolve_estimator,
 )
+from backend.app.config.agent_task_labels import (
+    INGESTION_PARSE_DEV,
+    INGESTION_PARSE_HOLD,
+    INGESTION_PARSE_NEW,
+    INGESTION_PARSE_OOS,
+    INGESTION_REFINEMENT,
+)
 
 
 class IngestionAgent(Agent):
     def __init__(self, session_id: str, queue: asyncio.Queue):
         super().__init__("ingestion", session_id, queue)
         self._declare_tasks([
-            {"id": "parse_dev_data", "name": "Parse Development Data"},
-            {"id": "parse_new_data", "name": "Parse New Data"},
-            {"id": "parse_hold_data", "name": "Parse Development Validation Sample"},
-            {"id": "refinement", "name": "Refinement — reconcile dataset schemas"},
-            {"id": "parse_new_data_oos", "name": "Parse New Validation Sample"},
+            {"id": "parse_dev_data", "name": INGESTION_PARSE_DEV},
+            {"id": "parse_new_data", "name": INGESTION_PARSE_NEW},
+            {"id": "parse_hold_data", "name": INGESTION_PARSE_HOLD},
+            {"id": "refinement", "name": INGESTION_REFINEMENT},
+            {"id": "parse_new_data_oos", "name": INGESTION_PARSE_OOS},
             {"id": "load_model_object", "name": "Load model object"},
             {"id": "validate_preprocessing_code", "name": "Validate preprocessing code"},
             {"id": "validate_feature_engineering_code", "name": "Validate feature engineering code"},
@@ -76,9 +84,9 @@ class IngestionAgent(Agent):
                 raise
 
         try:
-            dev_rows, dev_cols, dev_df = await _parse_dataset("parse_dev_data", dev_path, "Dev data")
-            new_rows, new_cols, new_df = await _parse_dataset("parse_new_data", new_path, "New data")
-            hold_rows, hold_cols, hold_df = await _parse_dataset("parse_hold_data", hold_path, "Hold data")
+            dev_rows, dev_cols, dev_df = await _parse_dataset("parse_dev_data", dev_path, DEV_DATA)
+            new_rows, new_cols, new_df = await _parse_dataset("parse_new_data", new_path, NEW_DATA)
+            hold_rows, hold_cols, hold_df = await _parse_dataset("parse_hold_data", hold_path, HOLD_DATA)
         except Exception as e:
             await self.failed(str(e))
             return {}
@@ -109,7 +117,7 @@ class IngestionAgent(Agent):
         )
 
         try:
-            oos_rows, oos_cols, oos_df = await _parse_dataset("parse_new_data_oos", oos_path, "New data OOS")
+            oos_rows, oos_cols, oos_df = await _parse_dataset("parse_new_data_oos", oos_path, NEW_VALIDATION)
         except Exception as e:
             await self.failed(str(e))
             return {}

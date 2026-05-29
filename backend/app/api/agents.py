@@ -133,7 +133,11 @@ async def run_agent(agent_name: str, body: dict):
             info = _get_run_info(session_id, agent_name)
             if info is not None:
                 info["status"] = "failed"
-            await queue.put({"agent": agent_name, "event_type": "failed", "message": str(e)})
+            await queue.put({
+                "agent": agent_name,
+                "event_type": "failed",
+                "message": str(e) or "Agent execution failed",
+            })
 
     asyncio.create_task(_run())
 
@@ -164,27 +168,33 @@ async def agent_status(agent_name: str, session_id: str = Query(...)):
     }
 
 
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 @router.get("/{agent_name}/events")
 async def agent_events(agent_name: str, session_id: str = Query(...)):
-    session, run_info = await _wait_for_run_info(session_id, agent_name)
-    if not session:
-        async def _err():
-            yield f"data: {json.dumps({'event_type': 'failed', 'message': 'Session not found'})}\n\n"
-        return StreamingResponse(_err(), media_type="text/event-stream")
-
-    if not run_info:
-        async def _err_not_started():
-            yield f"data: {json.dumps({'event_type': 'failed', 'message': f'Agent {agent_name} has not been started'})}\n\n"
-        return StreamingResponse(_err_not_started(), media_type="text/event-stream")
-
-    queue: EventBufferQueue | None = run_info.get("queue")
-    if not queue:
-        queue = EventBufferQueue(session_id, agent_name)
-        run_info["queue"] = queue
+    """Stream agent events. Response headers are sent immediately; run wait happens inside the stream."""
 
     async def _stream():
-        # Flush headers immediately so browsers/proxies open the connection
+        # Open the SSE connection right away (avoids frontend deadlock waiting for POST /run).
         yield f"data: {json.dumps({'event_type': 'connected', 'message': 'stream open'})}\n\n"
+
+        session, run_info = await _wait_for_run_info(session_id, agent_name)
+        if not session:
+            yield f"data: {json.dumps({'event_type': 'failed', 'message': 'Session not found'})}\n\n"
+            return
+        if not run_info:
+            yield f"data: {json.dumps({'event_type': 'failed', 'message': f'Agent {agent_name} has not been started'})}\n\n"
+            return
+
+        queue: EventBufferQueue | None = run_info.get("queue")
+        if not queue:
+            queue = EventBufferQueue(session_id, agent_name)
+            run_info["queue"] = queue
 
         cursor = 0
         while True:
@@ -196,7 +206,7 @@ async def agent_events(agent_name: str, session_id: str = Query(...)):
             while cursor < len(events):
                 item = events[cursor]
                 cursor += 1
-                yield f"data: {json.dumps(item)}\n\n"
+                yield f"data: {json.dumps(_json_safe(item))}\n\n"
 
             status = run_info.get("status")
             if status == "completed":
@@ -204,7 +214,12 @@ async def agent_events(agent_name: str, session_id: str = Query(...)):
                 yield f"data: {json.dumps({'event_type': 'completed', 'output': safe_output})}\n\n"
                 break
             if status == "failed":
-                yield f"data: {json.dumps({'event_type': 'failed', 'message': 'Agent execution failed'})}\n\n"
+                last_msg = "Agent execution failed"
+                for evt in reversed(events):
+                    if evt.get("event_type") == "failed" and evt.get("message"):
+                        last_msg = str(evt["message"])
+                        break
+                yield f"data: {json.dumps({'event_type': 'failed', 'message': last_msg})}\n\n"
                 break
 
             queue_ref: EventBufferQueue | None = run_info.get("queue")
@@ -216,15 +231,7 @@ async def agent_events(agent_name: str, session_id: str = Query(...)):
             if not woke:
                 yield f"data: {json.dumps({'event_type': 'heartbeat'})}\n\n"
 
-    return StreamingResponse(
-        _stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return StreamingResponse(_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 @router.get("/{agent_name}/result")

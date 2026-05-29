@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle, XCircle, Circle, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { allIngestionDatasetLabels, INGESTION_DATASETS } from "@/config/datasets";
+import { humanizeDatasetText } from "@/lib/datasetLabels";
 import { agentEventsUrl, getAgentResult, getAgentStatus, type AgentName } from "@/services/api";
 
 const DEV = INGESTION_DATASETS.dev_data.label;
@@ -160,14 +161,13 @@ function buildTasksFromEvents(
       if (!row) continue;
       const taskStatus = String(evt.task_status ?? "pending") as TaskItem["status"];
       row.status = taskStatus;
-      row.name = String(evt.task_name || row.name);
       const summary = (evt.output as { summary?: string } | undefined)?.summary;
       if (taskStatus === "completed") {
-        row.output = summary;
+        row.output = summary ? humanizeDatasetText(summary) : undefined;
         row.detail = undefined;
-        logs.push(`✓ ${row.name}${summary ? ` — ${summary}` : ""}`);
+        logs.push(`✓ ${row.name}${row.output ? ` — ${row.output}` : ""}`);
       } else if (taskStatus === "failed") {
-        row.output = String(evt.message ?? "failed");
+        row.output = humanizeDatasetText(String(evt.message ?? "failed"));
         row.detail = undefined;
         logs.push(`✗ ${row.name}: ${row.output}`);
       } else if (taskStatus === "running") {
@@ -179,9 +179,10 @@ function buildTasksFromEvents(
     if (type === "log") {
       const message = String(evt.message ?? "");
       if (message) {
-        logs.push(message);
+        const line = humanizeDatasetText(message);
+        logs.push(line);
         const running = tasks.find((t) => t.status === "running");
-        if (running) running.detail = message;
+        if (running) running.detail = line;
       }
       continue;
     }
@@ -206,6 +207,7 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
   const reconnectAttemptsRef = useRef(0);
   const completedNotifiedRef = useRef(false);
   const streamConnectedRef = useRef(false);
+  const agentRunStartedRef = useRef(false);
   const eventsRef = useRef<Record<string, unknown>[]>([]);
 
   const taskHelp = TASK_HELP[agent] ?? {};
@@ -249,7 +251,14 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
     setProgress(0);
     setStatus("running");
     streamConnectedRef.current = false;
+    agentRunStartedRef.current = false;
     completedNotifiedRef.current = false;
+
+    const kickoffAgentRun = () => {
+      if (!onStreamConnected || agentRunStartedRef.current) return;
+      agentRunStartedRef.current = true;
+      onStreamConnected();
+    };
 
     const pollStatus = () => {
       void getAgentStatus(sessionId, agent)
@@ -260,20 +269,28 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
           if (events.length > 0) {
             eventsRef.current = events;
             syncFromEvents(events);
+          } else if (snap.status === "completed" || snap.status === "failed") {
+            syncFromEvents(eventsRef.current);
           }
           if (snap.status === "completed") {
             finishCompleted(snap.result);
           } else if (snap.status === "failed") {
-            finishFailed("Agent execution failed");
+            const lastFailed = [...(snap.events ?? [])]
+              .reverse()
+              .find((e) => String(e.event_type) === "failed");
+            finishFailed(String(lastFailed?.message ?? "Agent execution failed"));
           }
         })
-        .catch(() => {
-          // ignore transient poll errors
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : "status poll failed";
+          setLogs((l) => (l.length > 0 && l[l.length - 1] === msg ? l : [...l, msg]));
         });
     };
 
+    // Start the agent as soon as the stepper mounts (do not wait for SSE — backend used to block until /run).
+    kickoffAgentRun();
     pollStatus();
-    const pollTimer = window.setInterval(pollStatus, 1200);
+    const pollTimer = window.setInterval(pollStatus, 500);
 
     const url = agentEventsUrl(sessionId, agent);
     const es = new EventSource(url);
@@ -283,7 +300,6 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
       if (streamConnectedRef.current) return;
       streamConnectedRef.current = true;
       setLogs((l) => (l[0] === "Connecting…" ? [`Live stream · ${agent} agent`] : l));
-      onStreamConnected?.();
     };
 
     es.onopen = () => notifyStreamConnected();

@@ -17,18 +17,27 @@ from backend.app.utils.processed_paths import (
     score_comparison_path,
     export_paths_payload,
 )
+from backend.app.config.datasets import DEV_DATA, HOLD_DATA, NEW_DATA, NEW_VALIDATION, ALL_DATASETS_PHRASE
+from backend.app.config.agent_task_labels import (
+    REPRO_APPLY_FEATURES,
+    REPRO_APPLY_PREPROCESSING,
+    REPRO_SCORE_DEV,
+    REPRO_SCORE_HOLD,
+    REPRO_SCORE_NEW,
+    REPRO_SCORE_OOS,
+)
 
 
 class ReproducibilityAgent(Agent):
     def __init__(self, session_id: str, queue: asyncio.Queue):
         super().__init__("reproducibility", session_id, queue)
         self._declare_tasks([
-            {"id": "apply_preprocessing", "name": "Apply preprocessing to dev/new/hold/OOS data"},
-            {"id": "apply_feature_engineering", "name": "Apply feature engineering to dev/new/hold/OOS data"},
-            {"id": "score_dev_data", "name": "Score dev data with model"},
-            {"id": "score_new_data", "name": "Score new data with model"},
-            {"id": "score_hold_data", "name": "Score hold (OOT) data with model"},
-            {"id": "score_new_data_oos", "name": "Score new data OOS with model"},
+            {"id": "apply_preprocessing", "name": REPRO_APPLY_PREPROCESSING},
+            {"id": "apply_feature_engineering", "name": REPRO_APPLY_FEATURES},
+            {"id": "score_dev_data", "name": REPRO_SCORE_DEV},
+            {"id": "score_new_data", "name": REPRO_SCORE_NEW},
+            {"id": "score_hold_data", "name": REPRO_SCORE_HOLD},
+            {"id": "score_new_data_oos", "name": REPRO_SCORE_OOS},
             {"id": "predict_new_outcome", "name": "Finalize outcomes and persist artifacts"},
             {"id": "compare_to_original", "name": "Compare to original scores (Spearman ρ)"},
             {"id": "evaluate_threshold", "name": "Evaluate reproducibility threshold"},
@@ -69,13 +78,15 @@ class ReproducibilityAgent(Agent):
             return {}
 
         if has_hold:
-            await self.log(f"Hold (OOT) data loaded: {len(hold_df):,} rows from ingestion upload")
+            await self.log(f"{HOLD_DATA} loaded: {len(hold_df):,} rows from ingestion upload")
         else:
-            await self.log("No hold data uploaded — recalibration will fall back to dev time-split for OOT")
+            await self.log(
+                f"No {HOLD_DATA} uploaded — recalibration will fall back to {DEV_DATA} time-split"
+            )
         if has_oos:
-            await self.log(f"New data OOS loaded: {len(oos_df):,} rows from ingestion upload")
+            await self.log(f"{NEW_VALIDATION} loaded: {len(oos_df):,} rows from ingestion upload")
         else:
-            await self.log("No OOS data uploaded — OOS scoring will be skipped")
+            await self.log(f"No {NEW_VALIDATION} uploaded — scoring will be skipped")
 
         def _load_py_module(path: str, module_name: str):
             if not str(path).lower().endswith(".py"):
@@ -206,7 +217,7 @@ class ReproducibilityAgent(Agent):
             )
             await self.task_completed(
                 "apply_preprocessing",
-                f"Dev/New/Hold/OOS preprocessed: {len(processed_dev_df):,}/{len(processed_new_df):,}"
+                f"{ALL_DATASETS_PHRASE} preprocessed: {len(processed_dev_df):,}/{len(processed_new_df):,}"
                 + (f"/{len(processed_hold_df):,}" if has_hold else "")
                 + (f"/{len(processed_oos_df):,}" if has_oos else ""),
             )
@@ -266,7 +277,7 @@ class ReproducibilityAgent(Agent):
             await self.log(f"Derived features: {new_features}")
             await self.task_completed(
                 "apply_feature_engineering",
-                f"Added {len(new_features)} engineered features (dev/new/hold)",
+                f"Added {len(new_features)} engineered features ({DEV_DATA}, {NEW_DATA}, {HOLD_DATA})",
             )
         except Exception as e:
             await self.log(f"Feature engineering warning: {e}")
@@ -306,7 +317,10 @@ class ReproducibilityAgent(Agent):
             await self.log(f"Dev scored {dev_scored:,} records")
             await self.log(f"Dev score range: [{dev_scores.min():.4f}, {dev_scores.max():.4f}]")
             await self.log(f"Dev mean score: {dev_scores.mean():.4f}")
-            await self.task_completed("score_dev_data", f"{dev_scored:,} dev records scored | mean={dev_scores.mean():.3f}")
+            await self.task_completed(
+                "score_dev_data",
+                f"{dev_scored:,} {DEV_DATA} records scored | mean={dev_scores.mean():.3f}",
+            )
         except Exception as e:
             await self.task_failed("score_dev_data", str(e))
             await self.failed(str(e))
@@ -324,7 +338,10 @@ class ReproducibilityAgent(Agent):
             await self.log(f"New scored {new_scored:,} records")
             await self.log(f"New score range: [{new_scores.min():.4f}, {new_scores.max():.4f}]")
             await self.log(f"New mean score: {new_scores.mean():.4f}")
-            await self.task_completed("score_new_data", f"{new_scored:,} new records scored | mean={new_scores.mean():.3f}")
+            await self.task_completed(
+                "score_new_data",
+                f"{new_scored:,} {NEW_DATA} records scored | mean={new_scores.mean():.3f}",
+            )
         except Exception as e:
             await self.task_failed("score_new_data", str(e))
             await self.failed(str(e))
@@ -338,20 +355,20 @@ class ReproducibilityAgent(Agent):
                 hold_feature_cols = [c for c in engineered_hold_df.columns if c not in excluded_feature_cols]
                 common_hold_cols = [c for c in model_feature_cols if c in engineered_hold_df.columns]
                 hold_scoring_cols = common_hold_cols if common_hold_cols else hold_feature_cols
-                hold_scores = await _score_with_progress("Hold (OOT)", model, engineered_hold_df, hold_scoring_cols)
-                await self.log(f"Hold (OOT) scored {len(hold_scores):,} records")
+                hold_scores = await _score_with_progress(HOLD_DATA, model, engineered_hold_df, hold_scoring_cols)
+                await self.log(f"{HOLD_DATA} scored {len(hold_scores):,} records")
                 await self.log(f"Hold score range: [{hold_scores.min():.4f}, {hold_scores.max():.4f}]")
                 await self.log(f"Hold mean score: {hold_scores.mean():.4f}")
                 await self.task_completed(
                     "score_hold_data",
-                    f"{len(hold_scores):,} hold records scored | mean={hold_scores.mean():.3f}",
+                    f"{len(hold_scores):,} {HOLD_DATA} records scored | mean={hold_scores.mean():.3f}",
                 )
             except Exception as e:
                 await self.task_failed("score_hold_data", str(e))
                 await self.failed(str(e))
                 return {}
         else:
-            await self.task_completed("score_hold_data", "Skipped (no hold data uploaded)")
+            await self.task_completed("score_hold_data", f"Skipped (no {HOLD_DATA} uploaded)")
 
         oos_scores = np.asarray([], dtype=float)
         if has_oos and engineered_oos_df is not None:
@@ -361,20 +378,20 @@ class ReproducibilityAgent(Agent):
                 oos_feature_cols = [c for c in engineered_oos_df.columns if c not in excluded_feature_cols]
                 common_oos_cols = [c for c in model_feature_cols if c in engineered_oos_df.columns]
                 oos_scoring_cols = common_oos_cols if common_oos_cols else oos_feature_cols
-                oos_scores = await _score_with_progress("OOS", model, engineered_oos_df, oos_scoring_cols)
-                await self.log(f"OOS scored {len(oos_scores):,} records")
+                oos_scores = await _score_with_progress(NEW_VALIDATION, model, engineered_oos_df, oos_scoring_cols)
+                await self.log(f"{NEW_VALIDATION} scored {len(oos_scores):,} records")
                 await self.log(f"OOS score range: [{oos_scores.min():.4f}, {oos_scores.max():.4f}]")
                 await self.log(f"OOS mean score: {oos_scores.mean():.4f}")
                 await self.task_completed(
                     "score_new_data_oos",
-                    f"{len(oos_scores):,} OOS records scored | mean={oos_scores.mean():.3f}",
+                    f"{len(oos_scores):,} {NEW_VALIDATION} records scored | mean={oos_scores.mean():.3f}",
                 )
             except Exception as e:
                 await self.task_failed("score_new_data_oos", str(e))
                 await self.failed(str(e))
                 return {}
         else:
-            await self.task_completed("score_new_data_oos", "Skipped (no OOS data uploaded)")
+            await self.task_completed("score_new_data_oos", f"Skipped (no {NEW_VALIDATION} uploaded)")
 
         # Task 6: resolve outcomes and persist artifacts
         await self.task_started("predict_new_outcome")

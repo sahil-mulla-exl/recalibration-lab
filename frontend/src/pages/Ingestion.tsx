@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -452,7 +452,9 @@ export default function Ingestion() {
   const [clearingAll, setClearingAll] = useState(false);
   const [activeAgent, setActiveAgent] = useState<"ingestion" | null>(null);
   const [ingestionDone, setIngestionDone] = useState(false);
+  const [ingestionError, setIngestionError] = useState<string | null>(null);
   const [autoProceedAfterIngestion, setAutoProceedAfterIngestion] = useState(false);
+  const agentLaunchRef = useRef(false);
   const [, setReproDone] = usePersistedState<boolean>("rcl:reproDone", false);
   const [targetVariable, setTargetVariable] = usePersistedState<string>("rcl:targetVariable", "");
   const [outcomeVariable, setOutcomeVariable] = usePersistedState<string>("rcl:outcomeVariable", "");
@@ -541,16 +543,29 @@ export default function Ingestion() {
   const hasMandatoryVariableSelection = Boolean(targetVariable && outcomeVariable);
   const variableSelectionMissing = !hasMandatoryVariableSelection;
 
-  const startIngestion = async () => {
+  const launchIngestionAgent = () => {
+    if (!sessionId || agentLaunchRef.current) return;
+    agentLaunchRef.current = true;
+    setIngestionError(null);
+    void runAgent(sessionId, "ingestion", {
+      target_variable: targetVariable,
+      outcome_variable: outcomeVariable,
+    }).catch((err) => {
+      agentLaunchRef.current = false;
+      setIngestionError(err instanceof Error ? err.message : "Failed to start ingestion agent");
+    });
+  };
+
+  const startIngestion = () => {
     if (!sessionId) return;
     if (variableSelectionMissing) return;
     setIngestionDone(false);
     setReproDone(false);
+    setIngestionError(null);
+    agentLaunchRef.current = false;
     setActiveAgent("ingestion");
-    await runAgent(sessionId, "ingestion", {
-      target_variable: targetVariable,
-      outcome_variable: outcomeVariable,
-    });
+    // Kick off immediately; AgentStepper also calls launch on mount as a fallback.
+    launchIngestionAgent();
   };
 
   const handleProceedToDataProcessing = async () => {
@@ -561,7 +576,7 @@ export default function Ingestion() {
       return;
     }
     setAutoProceedAfterIngestion(true);
-    await startIngestion();
+    startIngestion();
   };
 
   return (
@@ -767,11 +782,16 @@ export default function Ingestion() {
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <Card className="p-5">
               <h2 className="font-semibold text-sm mb-4">Ingestion Agent</h2>
+              {ingestionError && (
+                <p className="text-xs text-destructive mb-3">{ingestionError}</p>
+              )}
               {sessionId && (
                 <AgentStepper
                   sessionId={sessionId}
                   agent="ingestion"
+                  onStreamConnected={launchIngestionAgent}
                   onCompleted={() => {
+                    agentLaunchRef.current = false;
                     setIngestionDone(true);
                     setActiveAgent(null);
                     if (autoProceedAfterIngestion) {
@@ -779,6 +799,10 @@ export default function Ingestion() {
                       setStep(2);
                       navigate("/post-ingestion");
                     }
+                  }}
+                  onFailed={(message) => {
+                    agentLaunchRef.current = false;
+                    setIngestionError(message);
                   }}
                 />
               )}

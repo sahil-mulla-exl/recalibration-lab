@@ -46,11 +46,20 @@ export default defineConfig({
       "/api": {
         target: apiTarget,
         changeOrigin: true,
+        proxyTimeout: 0,
+        timeout: 0,
         configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            if (req.url?.includes("/events")) {
+              proxyReq.setHeader("Accept", "text/event-stream");
+            }
+          });
           proxy.on("proxyRes", (proxyRes, req) => {
             if (req.url?.includes("/events")) {
-              proxyRes.headers["cache-control"] = "no-cache";
+              proxyRes.headers["cache-control"] = "no-cache, no-transform";
+              proxyRes.headers["connection"] = "keep-alive";
               proxyRes.headers["x-accel-buffering"] = "no";
+              delete proxyRes.headers["content-length"];
             }
           });
         },

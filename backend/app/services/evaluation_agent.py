@@ -18,13 +18,15 @@ from backend.app.utils.drift_metrics import (
     compute_auc, compute_ks_stat, compute_gini, compute_lift_by_decile, compute_calibration_by_decile,
     compute_rmse, compute_mae, compute_r2,
 )
+from backend.app.config.datasets import HOLD_DATA, NEW_VALIDATION
+from backend.app.config.agent_task_labels import EVAL_SCORE_HOLDOUTS
 
 
 class EvaluationAgent(Agent):
     def __init__(self, session_id: str, queue: asyncio.Queue):
         super().__init__("evaluation", session_id, queue)
         self._declare_tasks([
-            {"id": "score_oot_with_original",     "name": "Score holdouts with champion and recalibrated models"},
+            {"id": "score_oot_with_original",     "name": EVAL_SCORE_HOLDOUTS},
             {"id": "compute_performance_metrics", "name": "Compute performance metrics (AUC, KS, lift)"},
             {"id": "compute_variable_experience", "name": "Compute variable importance comparison"},
             {"id": "compute_score_migration",     "name": "Compute 10×10 score migration matrix"},
@@ -62,8 +64,8 @@ class EvaluationAgent(Agent):
             session, data_dir, prefer_processed=True
         )
         await self.log(
-            f"Evaluation cohorts: hold={hold_source} ({len(hold_df):,} rows), "
-            f"oos={oos_source} ({len(oos_df):,} rows)"
+            f"Evaluation cohorts: {HOLD_DATA}={hold_source} ({len(hold_df):,} rows), "
+            f"{NEW_VALIDATION}={oos_source} ({len(oos_df):,} rows)"
         )
 
         y_hold = _resolve_y_vector(hold_df, target_col, outcome_col)
@@ -112,29 +114,29 @@ class EvaluationAgent(Agent):
             exclude={target_col, outcome_col, TARGET_COL, "predicted_outcome"},
         )
         await self.log(
-            f"Scoring with {len(hold_feature_cols)} model features from .pkl (hold) · "
-            f"{len(oos_feature_cols)} (OOS)"
+            f"Scoring with {len(hold_feature_cols)} model features from .pkl ({HOLD_DATA}) · "
+            f"{len(oos_feature_cols)} ({NEW_VALIDATION})"
         )
         champion_hold_scores = await _score_with_progress(
-            "Champion on Development Validation Sample", orig_model, hold_df, hold_feature_cols
+            f"Champion on {HOLD_DATA}", orig_model, hold_df, hold_feature_cols
         )
         champion_oos_scores = await _score_with_progress(
-            "Champion on New Validation Sample", orig_model, oos_df, oos_feature_cols
+            f"Champion on {NEW_VALIDATION}", orig_model, oos_df, oos_feature_cols
         )
         recalibrated_oos_scores = _extract_recalibrated_scores(
             oos_df, oot_scores_path, len(oos_df)
         )
         if recalibrated_oos_scores is None:
             recalibrated_oos_scores = await _score_with_progress(
-                "Recalibrated on New Validation Sample", new_model, oos_df, oos_feature_cols
+                f"Recalibrated on {NEW_VALIDATION}", new_model, oos_df, oos_feature_cols
             )
 
-        await self.log(f"Champion scored {len(champion_hold_scores):,} rows on old holdout")
-        await self.log(f"Champion scored {len(champion_oos_scores):,} rows on new holdout")
-        await self.log(f"Recalibrated scored {len(recalibrated_oos_scores):,} rows on new holdout")
+        await self.log(f"Champion scored {len(champion_hold_scores):,} rows on {HOLD_DATA}")
+        await self.log(f"Champion scored {len(champion_oos_scores):,} rows on {NEW_VALIDATION}")
+        await self.log(f"Recalibrated scored {len(recalibrated_oos_scores):,} rows on {NEW_VALIDATION}")
         await self.task_completed(
             "score_oot_with_original",
-            f"hold={len(champion_hold_scores):,} | new holdout={len(recalibrated_oos_scores):,}",
+            f"{HOLD_DATA}={len(champion_hold_scores):,} | {NEW_VALIDATION}={len(recalibrated_oos_scores):,}",
         )
 
         await asyncio.sleep(0.5)
