@@ -89,8 +89,8 @@ function Shell({
                 <h1 className="text-lg font-bold leading-tight" style={{ color: "#FB4E0B" }}>
                   EXLdecision.ai
                 </h1>
-                <p className="text-[10px] font-medium leading-tight tracking-wide" style={{ color: "#005071" }}>
-                Recalibration Lab
+                <p className="text-[10px] font-medium leading-tight tracking-wide text-[#005071] dark:text-slate-200">
+                  Recalibration Lab
                 </p>
               </div>
             </div>
