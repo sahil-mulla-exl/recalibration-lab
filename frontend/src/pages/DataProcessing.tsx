@@ -209,7 +209,7 @@ export default function DataProcessing() {
                     <span className={`text-sm font-semibold ${matchStyle.value}`}>{matchStyle.label}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2 max-w-prose">
-                    Share of {rowsCompared.toLocaleString()} development data rows where the platform score matches the user reference score within ±10.01.
+                    Share of {rowsCompared.toLocaleString()} development data rows where the platform score matches the user reference score within ±0.01.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs w-fit">
                     <div>
