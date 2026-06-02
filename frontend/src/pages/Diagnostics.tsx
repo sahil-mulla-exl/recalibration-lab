@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 
 import { motion } from "framer-motion";
 
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Download } from "lucide-react";
 
 
 
@@ -39,6 +39,8 @@ import {
   configureRecalibration,
 
   normalizeOptimizationMethod,
+
+  downloadDiagnosticsReportFile,
 
   runAgent,
 
@@ -104,7 +106,24 @@ export default function Diagnostics() {
 
   const [report, setReport] = useState<DiagnosticsReport | null>((driftResult as DiagnosticsReport | null) ?? null);
 
+  const [downloadBusy, setDownloadBusy] = useState(false);
+
   const agentLaunchRef = useRef(false);
+
+  const activeTabMeta = DIAGNOSTICS_TABS.find((t) => t.id === activeTab);
+
+  const downloadTabId =
+    activeTab === "data" || activeTab === "concept" || activeTab === "performance" ? activeTab : null;
+
+  const handleDownloadTabReport = async () => {
+    if (!sessionId || !downloadTabId || !report) return;
+    try {
+      setDownloadBusy(true);
+      await downloadDiagnosticsReportFile(sessionId, downloadTabId, report as Record<string, unknown>);
+    } finally {
+      setDownloadBusy(false);
+    }
+  };
 
   const selectedModelId = selectedModel?.model_id ?? "";
   const metrics = useMemo(() => inventoryConfigs[selectedModelId] ?? [], [inventoryConfigs, selectedModelId]);
@@ -209,11 +228,11 @@ export default function Diagnostics() {
             JSON.stringify({
               hpMethod: inventoryHpMethod,
               cvFolds,
-              searchSpace: options?.searchSpace ?? {},
+              searchSpace: mergedSearchSpace ?? {},
             }),
           );
         }
-        localStorage.setItem("rcl:autoStartRecalibration", "true");
+        localStorage.removeItem("rcl:autoStartRecalibration");
       } catch {
         // Ignore storage errors; Recalibration page falls back to defaults.
       }
@@ -327,13 +346,26 @@ export default function Diagnostics() {
           <GovernanceBanner governance={report.governance} />
 
           <TabBar
-
             value={activeTab}
-
             onValueChange={(v) => setActiveTab(v as "data" | "concept" | "performance" | "summary")}
-
             items={DIAGNOSTICS_TABS}
-
+            trailing={
+              downloadTabId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs shrink-0"
+                  disabled={!sessionId || downloadBusy}
+                  onClick={() => void handleDownloadTabReport()}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {downloadBusy
+                    ? "Downloading..."
+                    : `Download ${activeTabMeta?.label ?? "tab"} report`}
+                </Button>
+              ) : null
+            }
           />
 
 

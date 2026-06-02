@@ -10,31 +10,56 @@ export const DIAGNOSTICS_TABS = [
   { id: "summary", label: "Summary", benchmark: HOLD },
 ] as const;
 
-export const DATA_SUBTABS = [
-  { id: "target", label: "Target Drift" },
-  { id: "feature", label: "Feature Drift (CSI)" },
-  { id: "cardinality", label: "Cardinality & Missing" },
+/** Section order when rendering combined Data Drift view (no nested tabs). */
+export const DATA_DRIFT_SECTIONS = [
   { id: "descriptive", label: "Descriptive Stats" },
+  { id: "cardinality", label: "Cardinality & Missing" },
+  { id: "target", label: "Target Drift" },
+  { id: "feature", label: "Feature Drift" },
 ] as const;
 
-export const CONCEPT_SUBTABS = [
-  { id: "iv", label: "IV & Univariate AUC" },
+export const CONCEPT_DRIFT_SECTIONS = [
+  { id: "iv", label: "IV & Univariate Gini" },
   { id: "monotonicity", label: "Bivariate" },
 ] as const;
 
-export const PERFORMANCE_SUBTABS = [
-  { id: "discrimination", label: "Discrimination & Stability" },
-  { id: "rank", label: "Rank Order & Lift" },
+export const PERFORMANCE_DRIFT_SECTIONS = [
   { id: "classification", label: "Classification" },
+  { id: "discrimination", label: "Discrimination" },
+  { id: "rank", label: "Rank Order & Lift" },
   { id: "interpretability", label: "Interpretability" },
 ] as const;
+
+/** @deprecated Use section arrays; kept for any legacy imports. */
+export const DATA_SUBTABS = DATA_DRIFT_SECTIONS;
+export const CONCEPT_SUBTABS = CONCEPT_DRIFT_SECTIONS;
+export const PERFORMANCE_SUBTABS = PERFORMANCE_DRIFT_SECTIONS;
 
 export const DIAGNOSTIC_FINAL_ACTIONS = [
   { id: "no_action", label: "Do not recalibrate", recalibrationAction: "no_action" },
   { id: "recal_same_hp", label: "Recalibrate — same hyperparameters", recalibrationAction: "recal_simple" },
-  { id: "recal_with_hp_opt", label: "Recalibrate — with HP optimisation", recalibrationAction: "recal_opt" },
+  { id: "recal_with_hp_opt", label: "Recalibrate — with hyperparameter optimisation", recalibrationAction: "recal_opt" },
   { id: "model_redevelopment", label: "Model redevelopment", recalibrationAction: "model_redevelopment" },
 ] as const;
+
+/** Human-readable recalibration path for export / model card (from diagnostics selection). */
+export function recalibrationDecisionLabel(action: string | undefined | null): string {
+  const key = String(action || "").trim().toLowerCase();
+  if (!key || key === "no_action") {
+    return DIAGNOSTIC_FINAL_ACTIONS.find((a) => a.recalibrationAction === "no_action")?.label ?? "Do not recalibrate";
+  }
+  const match = DIAGNOSTIC_FINAL_ACTIONS.find((a) => a.recalibrationAction === key);
+  if (match) return match.label;
+  if (key === "redevelop") {
+    return DIAGNOSTIC_FINAL_ACTIONS.find((a) => a.id === "model_redevelopment")?.label ?? "Model redevelopment";
+  }
+  return key.replace(/_/g, " ");
+}
+
+export function usesHyperparameterOptimization(action: string | undefined | null): boolean {
+  const key = String(action || "").trim().toLowerCase();
+  return key === "recal_opt" || key === "redevelop" || key === "model_redevelopment";
+}
 
 /** User-facing English copy for diagnostic decision actions. */
 export const DIAGNOSTIC_ACTION_MESSAGES = {

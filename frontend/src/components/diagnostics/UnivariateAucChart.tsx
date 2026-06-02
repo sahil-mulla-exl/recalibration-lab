@@ -1,46 +1,62 @@
-import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ChartPlot } from "@/components/diagnostics/ChartPlot";
-import { axisLabel, axisTick, cartesianGrid, chartLegendProps, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
-import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
-
-type Row = { feature: string; trainAuc: number; newAuc: number };
-type UnivariateAucChartProps = { rows: Row[] };
-
-export function UnivariateAucChart({ rows }: UnivariateAucChartProps) {
-  const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
-  const labels = rows.map((r) => r.feature);
-  const yWidth = featureLabelWidth(labels);
-  const height = chartHeightForFeatureRows(rows.length);
-
-  return (
-    <ChartPlot style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} layout="vertical" margin={{ top: 8, right: 16, left: Math.max(56, yWidth * 0.35), bottom: 40 }}>
-          <CartesianGrid {...cartesianGrid(theme, { horizontal: false })} />
-          <XAxis
-            type="number"
-            tickFormatter={fmt3}
-            tick={axisTick(theme)}
-            stroke={theme.axisLine}
-            label={axisLabel(theme, "Univariate AUC", "insideBottom", { offset: -4 })}
-          />
-          <YAxis
-            type="category"
-            dataKey="feature"
-            width={yWidth}
-            interval={0}
-            tick={axisTick(theme)}
-            stroke={theme.axisLine}
-            label={axisLabel(theme, "Feature", "insideLeft", { angle: -90, offset: 4 })}
-          />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
-          <Legend {...chartLegendProps(theme)} />
-          <Bar dataKey="trainAuc" name={driftBaselineLabel()} fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={1} />
-          <Bar dataKey="newAuc" name={INGESTION_DATASETS.new_data.label} fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} />
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartPlot>
-  );
-}
+import { useMemo } from "react";
+import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartFrame } from "@/components/diagnostics/ChartFrame";
+import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
+import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
+import { cartesianGrid, chartTooltipProps, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
+
+type Row = { feature: string; trainAuc: number; newAuc: number };
+type UnivariateAucChartProps = { rows: Row[] };
+
+export function UnivariateAucChart({ rows }: UnivariateAucChartProps) {
+  const theme = useChartTheme();
+  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const labels = rows.map((r) => r.feature);
+  const yWidth = featureLabelWidth(labels);
+  const height = chartHeightForFeatureRows(rows.length, 32);
+  const xDomain = useMemo(() => {
+    const vals = rows.flatMap((r) => [Number(r.trainAuc), Number(r.newAuc)]).filter((v) => Number.isFinite(v));
+    if (vals.length === 0) return [0, 0.15] as [number, number];
+    const minV = Math.min(...vals);
+    const maxV = Math.max(...vals);
+    const pad = Math.max(0.02, (maxV - minV) * 0.15);
+    return [Math.min(0, minV - pad), Math.max(0.05, maxV + pad)] as [number, number];
+  }, [rows]);
+
+  const legend = useMemo(
+    () => [
+      { value: driftBaselineLabel(), type: "square" as const, color: theme.series.train, dataKey: "trainAuc" },
+      { value: INGESTION_DATASETS.new_data.label, type: "square" as const, color: theme.series.new, dataKey: "newAuc" },
+    ],
+    [theme.series.train, theme.series.new],
+  );
+
+  return (
+    <ChartFrame theme={theme} height={height} legend={legend}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} layout="vertical" margin={horizontalBarMargin(yWidth, 4)}>
+          <CartesianGrid {...cartesianGrid(theme, { horizontal: false })} />
+          <XAxis
+            {...chartXAxis(theme, "Univariate Gini", {
+              type: "number",
+              domain: xDomain,
+              tickFormatter: fmt3,
+            })}
+          />
+          <YAxis
+            {...chartYAxis(theme, undefined, {
+              type: "category",
+              dataKey: "feature",
+              width: yWidth,
+              interval: 0,
+            })}
+          />
+          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Bar dataKey="trainAuc" fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={1} legendType="none" />
+          <Bar dataKey="newAuc" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} legendType="none" />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  );
+}

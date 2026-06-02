@@ -14,6 +14,10 @@ from backend.app.utils.model_helpers import (
 )
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.oot_data import load_oot_dataframe, load_oos_evaluation_dataframe
+from backend.app.utils.diagnostics_metrics import (
+    compute_ks_curve_points,
+    compute_rank_order_analysis,
+)
 from backend.app.utils.drift_metrics import (
     compute_auc, compute_ks_stat, compute_gini, compute_lift_by_decile, compute_calibration_by_decile,
     compute_rmse, compute_mae, compute_r2,
@@ -184,10 +188,19 @@ class EvaluationAgent(Agent):
             auc_delta = 0.0
         else:
             auc_delta = (new_auc - orig_auc) * 100
+            hold_rob = hold_metrics.get("rank_order_break") or {}
+            champ_rob = champion_oos_metrics.get("rank_order_break") or {}
+            recal_rob = recal_oos_metrics.get("rank_order_break") or {}
             await self.log(
                 f"Champion (old holdout) AUC: {hold_metrics['auc']:.4f} | "
                 f"Champion (new holdout) AUC: {orig_auc:.4f} | "
                 f"Recalibrated (new holdout) AUC: {new_auc:.4f} (Δ={auc_delta:+.2f}pp)"
+            )
+            await self.log(
+                f"Rank-order breaks (non-decreasing decile transitions): "
+                f"{HOLD_DATA} {hold_rob.get('non_decreasing_count', 0)}/{hold_rob.get('total_transitions', 0)} · "
+                f"{NEW_VALIDATION} champion {champ_rob.get('non_decreasing_count', 0)}/{champ_rob.get('total_transitions', 0)} · "
+                f"{NEW_VALIDATION} recalibrated {recal_rob.get('non_decreasing_count', 0)}/{recal_rob.get('total_transitions', 0)}"
             )
             await self.task_completed(
                 "compute_performance_metrics",
@@ -381,6 +394,18 @@ class EvaluationAgent(Agent):
             "champion_hold_cal_error": round(float(hold_metrics["cal_error"]), 2),
             "champion_hold_lift_table": hold_metrics["lift_table"],
             "champion_hold_roc": champion_hold_roc,
+            "champion_hold_ks_curve": hold_metrics.get("ks_curve") or [],
+            "orig_ks_curve": champion_oos_metrics.get("ks_curve") or [],
+            "new_ks_curve": recal_oos_metrics.get("ks_curve") or [],
+            "champion_hold_rank_order_break": hold_metrics.get("rank_order_break") or {},
+            "champion_oos_rank_order_break": champion_oos_metrics.get("rank_order_break") or {},
+            "recalibrated_oos_rank_order_break": recal_oos_metrics.get("rank_order_break") or {},
+            "champion_hold_decile_rates": hold_metrics.get("decile_rates") or [],
+            "champion_oos_decile_rates": champion_oos_metrics.get("decile_rates") or [],
+            "recalibrated_oos_decile_rates": recal_oos_metrics.get("decile_rates") or [],
+            "champion_hold_rank_order_deciles": hold_metrics.get("rank_order_deciles") or [],
+            "champion_oos_rank_order_deciles": champion_oos_metrics.get("rank_order_deciles") or [],
+            "recalibrated_oos_rank_order_deciles": recal_oos_metrics.get("rank_order_deciles") or [],
             "top_decile_lift_champion_hold": round(
                 hold_metrics["lift_table"][0]["lift"] if hold_metrics["lift_table"] else 0, 3
             ),
@@ -416,7 +441,7 @@ class EvaluationAgent(Agent):
 
 
 def _resolve_y_vector(df: pd.DataFrame, target_col: str, outcome_col: str) -> np.ndarray:
-    y_col = outcome_col if outcome_col in df.columns else (target_col if target_col in df.columns else None)
+    y_col = target_col if target_col in df.columns else (outcome_col if outcome_col in df.columns else None)
     if y_col is None:
         raise ValueError(
             f"Holdout data missing selected target/outcome columns: target='{target_col}', outcome='{outcome_col}'"
@@ -451,9 +476,19 @@ def _compute_cohort_metrics(y_true: np.ndarray, y_score: np.ndarray, is_regressi
             "calibration": [],
             "cal_error": 0.0,
             "roc": {"fpr": [], "tpr": []},
+            "ks_curve": [],
+            "decile_rates": [],
+            "rank_order_deciles": [],
+            "rank_order_break": {
+                "non_decreasing_count": 0,
+                "total_transitions": 0,
+                "break_indices": [],
+                "monotonicity_violations": [],
+            },
         }
     auc = compute_auc(y_true, y_score)
     cal = compute_calibration_by_decile(y_true, y_score)
+    rob_payload = compute_rank_order_analysis(y_true, y_score)
     return {
         "auc": auc,
         "ks": compute_ks_stat(y_true, y_score),
@@ -465,6 +500,10 @@ def _compute_cohort_metrics(y_true: np.ndarray, y_score: np.ndarray, is_regressi
         "calibration": cal,
         "cal_error": float(np.mean([r["dev_pct"] for r in cal])) if cal else 0.0,
         "roc": _compute_roc(y_true, y_score),
+        "ks_curve": compute_ks_curve_points(y_true, y_score, n=60),
+        "decile_rates": rob_payload.get("decile_rates") or [],
+        "rank_order_deciles": rob_payload.get("deciles") or [],
+        "rank_order_break": rob_payload.get("rank_order_break") or {},
     }
 
 
@@ -482,7 +521,11 @@ def _cohort_payload(metrics: Dict[str, Any], source: str, rows: int) -> Dict[str
         "cal_error": round(float(metrics.get("cal_error") or 0.0), 2),
         "top_decile_lift": round(lift[0]["lift"] if lift else 0.0, 3),
         "roc": metrics.get("roc") or {"fpr": [], "tpr": []},
+        "ks_curve": metrics.get("ks_curve") or [],
         "lift_table": lift,
+        "decile_rates": metrics.get("decile_rates") or [],
+        "rank_order_deciles": metrics.get("rank_order_deciles") or [],
+        "rank_order_break": metrics.get("rank_order_break") or {},
     }
 
 

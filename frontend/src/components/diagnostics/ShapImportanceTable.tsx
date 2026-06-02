@@ -16,7 +16,7 @@ export type ShapImportanceRow = {
   newImportance: number;
 };
 
-type ShapImportanceTableProps = { rows: ShapImportanceRow[] };
+type ShapImportanceTableProps = { rows: ShapImportanceRow[]; rankView?: "absolute" | "delta" };
 
 function rankDelta(devRank: number, newRank: number) {
   return devRank - newRank;
@@ -52,7 +52,7 @@ function ImportanceBar({ value, max, variant }: { value: number; max: number; va
   );
 }
 
-export function ShapImportanceTable({ rows }: ShapImportanceTableProps) {
+export function ShapImportanceTable({ rows, rankView = "delta" }: ShapImportanceTableProps) {
   if (!rows.length) {
     return <p className="text-sm text-muted-foreground py-4">No SHAP importance data available.</p>;
   }
@@ -69,9 +69,14 @@ export function ShapImportanceTable({ rows }: ShapImportanceTableProps) {
           <TableRow className="bg-gray-50 dark:bg-slate-900">
             <TableHead className="w-8 text-xs">#</TableHead>
             <TableHead className="text-xs">Feature</TableHead>
-            <TableHead className="text-xs text-right">{perfBaselineLabel()} rank</TableHead>
-            <TableHead className="text-xs text-right">{perfNewLabel()} rank</TableHead>
-            <TableHead className="text-xs text-right">Rank Δ</TableHead>
+            {rankView === "absolute" ? (
+              <>
+                <TableHead className="text-xs text-right">{perfBaselineLabel()} rank</TableHead>
+                <TableHead className="text-xs text-right">{perfNewLabel()} rank</TableHead>
+              </>
+            ) : (
+              <TableHead className="text-xs text-right">Rank Δ (dev − new)</TableHead>
+            )}
             <TableHead className="text-xs">{perfBaselineLabel()} importance</TableHead>
             <TableHead className="text-xs">{perfNewLabel()} importance</TableHead>
             <TableHead className="text-xs">Rating</TableHead>
@@ -101,9 +106,14 @@ export function ShapImportanceTable({ rows }: ShapImportanceTableProps) {
                 <TableCell className="text-xs font-semibold text-gray-900 dark:text-gray-100 py-2">
                   {row.feature}
                 </TableCell>
-                <TableCell className="text-xs text-right font-mono py-2">#{row.devRank}</TableCell>
-                <TableCell className="text-xs text-right font-mono py-2">#{row.newRank}</TableCell>
-                <TableCell className={`text-xs text-right font-mono py-2 ${deltaClass}`}>{deltaLabel}</TableCell>
+                {rankView === "absolute" ? (
+                  <>
+                    <TableCell className="text-xs text-right font-mono py-2">#{row.devRank}</TableCell>
+                    <TableCell className="text-xs text-right font-mono py-2">#{row.newRank}</TableCell>
+                  </>
+                ) : (
+                  <TableCell className={`text-xs text-right font-mono py-2 ${deltaClass}`}>{deltaLabel}</TableCell>
+                )}
                 <TableCell className="py-2">
                   <ImportanceBar value={row.devImportance} max={maxImportance} variant="dev" />
                 </TableCell>

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 
-import { CONCEPT_SUBTABS } from "@/config/diagnostics";
 
 import { ChartCard } from "@/components/diagnostics/ChartCard";
 
@@ -9,11 +8,6 @@ import { IvStrengthChart } from "@/components/diagnostics/IvStrengthChart";
 import { MonotonicityChart } from "@/components/diagnostics/MonotonicityChart";
 
 import { driftBaselineLabel, driftCompareSubtitle, INGESTION_DATASETS } from "@/config/datasets";
-import { SubTabBar } from "@/components/diagnostics/SubTabBar";
-
-import { useSession } from "@/contexts/session";
-
-import { downloadDiagnosticsReportFile } from "@/services/api";
 
 import { UnivariateAucChart } from "@/components/diagnostics/UnivariateAucChart";
 
@@ -28,13 +22,6 @@ type ConceptDriftTabProps = {
 
 
 export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
-
-  const { sessionId } = useSession();
-
-  const [subtab, setSubtab] = useState<string>("iv");
-
-  const [downloadBusy, setDownloadBusy] = useState(false);
-
   const [ivSort, setIvSort] = useState<"rank" | "delta">("delta");
 
   const [ivTop, setIvTop] = useState<number>(15);
@@ -101,7 +88,7 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
   }, [iv, ivSort, ivTop]);
 
-  const aucRows = useMemo(() => {
+  const giniRows = useMemo(() => {
 
     const rows = Object.entries(uniAuc).map(([feature, vals]) => {
 
@@ -109,7 +96,11 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
       const newAuc = Number(vals.new_auc ?? 0);
 
-      return { feature, trainAuc, newAuc, delta: newAuc - trainAuc };
+      const trainGini = 2 * trainAuc - 1;
+
+      const newGini = 2 * newAuc - 1;
+
+      return { feature, trainAuc: trainGini, newAuc: newGini, delta: newGini - trainGini };
 
     });
 
@@ -172,51 +163,7 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
   return (
 
     <div className="space-y-4">
-
-      <div className="flex items-center justify-between gap-2">
-
-        <SubTabBar value={subtab} onValueChange={setSubtab} items={CONCEPT_SUBTABS} />
-
-        <button
-
-          type="button"
-
-          className="h-8 rounded border px-3 text-xs bg-white dark:bg-slate-900 disabled:opacity-60"
-
-          disabled={!sessionId || downloadBusy}
-
-          onClick={async () => {
-
-            if (!sessionId) return;
-
-            try {
-
-              setDownloadBusy(true);
-
-              await downloadDiagnosticsReportFile(sessionId, "concept", report);
-
-            } finally {
-
-              setDownloadBusy(false);
-
-            }
-
-          }}
-
-        >
-
-          {downloadBusy ? "Downloading..." : "Download report"}
-
-        </button>
-
-      </div>
-
-
-
-      {subtab === "iv" && (
-
-        <div className="space-y-4">
-
+      <div className="space-y-4">
           <ChartCard
 
             title="Information Value (IV)"
@@ -263,9 +210,9 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
           <ChartCard
 
-            title="Univariate AUC"
+            title="Univariate Variable Gini"
 
-            subtitle="Model features from .pkl — single-feature AUC stability"
+            subtitle="Model features from .pkl — single-feature Gini stability (2×AUC − 1)"
 
             actions={(
 
@@ -275,9 +222,9 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
                 <select className="h-8 rounded border px-2 bg-background" value={aucSort} onChange={(e) => setAucSort(e.target.value as "rank" | "delta")}>
 
-                  <option value="rank">AUC rank ({driftBaselineLabel()})</option>
+                  <option value="rank">Gini rank ({driftBaselineLabel()})</option>
 
-                  <option value="delta">AUC decline (worst first)</option>
+                  <option value="delta">Gini decline (worst first)</option>
 
                 </select>
 
@@ -299,17 +246,10 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
           >
 
-            <UnivariateAucChart rows={aucRows} />
+            <UnivariateAucChart rows={giniRows} />
 
           </ChartCard>
-
-        </div>
-
-      )}
-
-
-
-      {subtab === "monotonicity" && (
+      </div>
 
         <ChartCard
           title="Bivariate relationship"
@@ -355,8 +295,6 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
           />
 
         </ChartCard>
-
-      )}
 
     </div>
 

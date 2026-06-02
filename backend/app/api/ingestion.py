@@ -19,6 +19,7 @@ KIND_TO_SESSION_KEY = {
     "model": "model_path",
     "preprocess": "preprocess_path",
     "features": "features_path",
+    "data_dictionary": "data_dictionary_path",
 }
 
 SAMPLE_FILES = {
@@ -92,18 +93,25 @@ def _data_summary(df, target_column: str | None = None) -> dict:
     return summary
 
 
-def _schema_check(dev_df, new_df, target_column: str | None = None) -> dict:
+def _schema_check(
+    dev_df,
+    new_df,
+    target_column: str | None = None,
+    outcome_column: str | None = None,
+) -> dict:
     """Compare candidate dataset schema against dev_data baseline."""
     dev_cols = list(dev_df.columns)
     new_cols = list(new_df.columns)
     dev_set = set(dev_cols)
     new_set = set(new_cols)
 
-    missing = sorted(dev_set - new_set)
-    extra = sorted(new_set - dev_set)
+    skip_cols = {c for c in (outcome_column,) if c}
+
+    missing = sorted((dev_set - new_set) - skip_cols)
+    extra = sorted((new_set - dev_set) - skip_cols)
 
     dtype_mismatches = []
-    for col in dev_set & new_set:
+    for col in (dev_set & new_set) - skip_cols:
         if str(dev_df[col].dtype) != str(new_df[col].dtype):
             dtype_mismatches.append({
                 "col": col,
@@ -114,11 +122,15 @@ def _schema_check(dev_df, new_df, target_column: str | None = None) -> dict:
     if target_column:
         target_in_dev = target_column in dev_set
         target_in_new = target_column in new_set
-        target_gate = target_in_dev == target_in_new
+        target_gate = target_in_dev and target_in_new
     else:
         target_in_dev = _infer_target_column(dev_df) is not None
         target_in_new = _infer_target_column(new_df) is not None
         target_gate = True
+
+    # Outcome is required on dev only; do not fail when absent on hold/new/oos.
+    outcome_in_dev = bool(outcome_column and outcome_column in dev_set) if outcome_column else None
+    outcome_in_new = bool(outcome_column and outcome_column in new_set) if outcome_column else None
 
     return {
         "match": (
@@ -133,10 +145,19 @@ def _schema_check(dev_df, new_df, target_column: str | None = None) -> dict:
         "dtype_mismatches": dtype_mismatches,
         "target_in_dev": target_in_dev,
         "target_in_new": target_in_new,
+        "outcome_in_dev": outcome_in_dev,
+        "outcome_in_new": outcome_in_new,
+        "outcome_excluded_from_schema": outcome_column if outcome_column else None,
     }
 
 
-def _get_file_meta(path: str, kind: str, dev_data_path: str | None = None, target_column: str | None = None) -> dict:
+def _get_file_meta(
+    path: str,
+    kind: str,
+    dev_data_path: str | None = None,
+    target_column: str | None = None,
+    outcome_column: str | None = None,
+) -> dict:
     meta: dict = {"path": path, "kind": kind}
     try:
         meta["size_kb"] = round(os.path.getsize(path) / 1024, 1)
@@ -151,7 +172,12 @@ def _get_file_meta(path: str, kind: str, dev_data_path: str | None = None, targe
                     try:
                         dev_df = _read_dataframe(dev_data_path)
                         if dev_df is not None:
-                            meta["schema_check"] = _schema_check(dev_df, df, target_column=target_column)
+                            meta["schema_check"] = _schema_check(
+                                dev_df,
+                                df,
+                                target_column=target_column,
+                                outcome_column=outcome_column,
+                            )
                     except Exception as e:
                         meta["schema_check"] = {"error": str(e)}
 
@@ -159,6 +185,13 @@ def _get_file_meta(path: str, kind: str, dev_data_path: str | None = None, targe
             import joblib
             model = joblib.load(path)
             meta.update(extract_model_metadata(model))
+
+        elif kind == "data_dictionary":
+            df = _read_dataframe(path)
+            if df is not None:
+                meta["rows"] = int(len(df))
+                meta["cols"] = int(len(df.columns))
+                meta["columns"] = [str(c) for c in df.columns.tolist()[:50]]
 
     except Exception as e:
         meta["error"] = str(e)
@@ -177,6 +210,8 @@ async def upload_file(
         return {"error": f"Unknown kind: {kind}"}
     if kind in {"preprocess", "features"} and not str(file.filename).lower().endswith(".py"):
         return {"error": "Only .py files are supported for code artifacts"}
+    if kind == "data_dictionary" and not str(file.filename).lower().endswith((".csv", ".xlsx", ".xls")):
+        return {"error": "Data dictionary must be a .csv or .xlsx file"}
 
     sess_dir = session_dir(session_id)
     dest_path = os.path.join(sess_dir, file.filename)
@@ -216,8 +251,17 @@ async def upload_file(
     # For new_data, run schema check against currently-stored dev_data path
     session = get_session(session_id) or {}
     dev_data_path = session.get("dev_data_path")
+    session = get_session(session_id) or {}
     resolved_target = target_variable or session.get("target_variable")
-    meta = _get_file_meta(dest_path, kind, dev_data_path=dev_data_path, target_column=resolved_target)
+    resolved_outcome = outcome_variable or session.get("outcome_variable")
+    schema_outcome = resolved_outcome if kind != "dev_data" else None
+    meta = _get_file_meta(
+        dest_path,
+        kind,
+        dev_data_path=dev_data_path,
+        target_column=resolved_target,
+        outcome_column=schema_outcome,
+    )
     meta["filename"] = file.filename
     return meta
 
@@ -252,16 +296,95 @@ async def load_samples(body: dict):
     # Second pass: compute meta (with schema check available for new_data).
     results: dict[str, dict] = {}
     dev_data_path = paths.get("dev_data") or None
+    session = get_session(session_id) or {}
+    resolved_target = target_variable or session.get("target_variable")
+    resolved_outcome = outcome_variable or session.get("outcome_variable")
     for kind, filename in SAMPLE_FILES.items():
         path = paths.get(kind) or ""
         if not path:
             results[kind] = {"error": f"Sample file not found: {filename}"}
             continue
-        meta = _get_file_meta(path, kind, dev_data_path=dev_data_path, target_column=target_variable)
+        schema_outcome = resolved_outcome if kind != "dev_data" else None
+        meta = _get_file_meta(
+            path,
+            kind,
+            dev_data_path=dev_data_path,
+            target_column=resolved_target,
+            outcome_column=schema_outcome,
+        )
         meta["filename"] = filename
         results[kind] = meta
 
     return {"loaded": results, "session_id": session_id}
+
+
+def _refresh_dataset_schema_meta(session_id: str) -> dict[str, dict]:
+    """Recompute schema_check for non-dev datasets after target/outcome selection changes."""
+    session = get_session(session_id) or {}
+    dev_path = session.get("dev_data_path")
+    target_col = session.get("target_variable")
+    outcome_col = session.get("outcome_variable")
+    refreshed: dict[str, dict] = {}
+    if not dev_path or not os.path.exists(dev_path):
+        return refreshed
+    for kind in ("new_data", "hold_data", "new_data_oos"):
+        path = session.get(KIND_TO_SESSION_KEY[kind])
+        if not path or not os.path.exists(path):
+            continue
+        meta = _get_file_meta(
+            path,
+            kind,
+            dev_data_path=dev_path,
+            target_column=target_col,
+            outcome_column=outcome_col,
+        )
+        refreshed[kind] = meta
+    return refreshed
+
+
+@router.post("/configure-variables")
+async def configure_variables(body: dict):
+    """Persist target/outcome on dev data and refresh schema checks for other datasets."""
+    session_id = body.get("session_id")
+    if not session_id:
+        return {"error": "session_id required"}
+    target_variable = body.get("target_variable")
+    outcome_variable = body.get("outcome_variable")
+    if not target_variable or not outcome_variable:
+        return {"error": "target_variable and outcome_variable are required"}
+
+    session = get_session(session_id)
+    if not session:
+        return {"error": "Session not found"}
+    dev_path = session.get("dev_data_path")
+    if not dev_path or not os.path.exists(dev_path):
+        return {"error": "Upload Development Data before selecting variables"}
+
+    dev_df = _read_dataframe(dev_path)
+    if dev_df is None:
+        return {"error": "Unable to read Development Data"}
+    if target_variable not in dev_df.columns:
+        return {"error": f"Target variable '{target_variable}' not found in Development Data"}
+    if outcome_variable not in dev_df.columns:
+        return {"error": f"Outcome variable '{outcome_variable}' not found in Development Data"}
+
+    update_session(
+        session_id,
+        {"target_variable": target_variable, "outcome_variable": outcome_variable},
+    )
+    refreshed = _refresh_dataset_schema_meta(session_id)
+    refreshed["dev_data"] = _get_file_meta(
+        dev_path,
+        "dev_data",
+        target_column=target_variable,
+    )
+    refreshed["dev_data"]["filename"] = os.path.basename(dev_path)
+    return {
+        "ok": True,
+        "target_variable": target_variable,
+        "outcome_variable": outcome_variable,
+        "refreshed": refreshed,
+    }
 
 
 @router.post("/remove")

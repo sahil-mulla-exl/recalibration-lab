@@ -8,6 +8,7 @@ from backend.app.utils.export_scores import (
     DEFAULT_REFERENCE_PREDICTIONS,
     build_score_comparison,
     ensure_predicted_proba,
+    prepare_score_comparison_table,
 )
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.processed_paths import processed_csv_path, score_comparison_path
@@ -15,6 +16,22 @@ from backend.app.utils.processed_paths import processed_csv_path, score_comparis
 router = APIRouter()
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+
+_RECALIBRATION_DECISION_LABELS = {
+    "no_action": "Do not recalibrate",
+    "recal_simple": "Recalibrate — same hyperparameters",
+    "recal_opt": "Recalibrate — with hyperparameter optimisation",
+    "redevelop": "Model redevelopment",
+    "model_redevelopment": "Model redevelopment",
+}
+
+
+def _recalibration_decision_label(session: dict) -> str:
+    action = str(session.get("selected_recommended_action") or "").strip().lower()
+    if not action:
+        recal = session.get("recalibration_result") or {}
+        action = str(recal.get("selected_action") or "").strip().lower()
+    return _RECALIBRATION_DECISION_LABELS.get(action, action.replace("_", " ").title() if action else "—")
 
 
 @router.get("/model")
@@ -128,7 +145,7 @@ async def export_report(session_id: str = Query(...)):
                 ["New AUC", str(drift.get("new_auc", "—"))],
                 ["AUC Drop (pp)", str(drift.get("auc_drop_pp", "—"))],
                 ["Max Calibration Error", f"{drift.get('max_calibration_dev_pct', 0):.1f}%"],
-                ["Verdict", drift.get("verdict", "—").upper()],
+                ["Drift Verdict", _recalibration_decision_label(session)],
             ]
             t2 = Table(drift_data, colWidths=[7*cm, 8*cm])
             t2.setStyle(TableStyle([
@@ -268,7 +285,7 @@ async def score_comparison_data(
             "summary": repro.get("score_comparison_summary") or session.get(f"score_comparison_{dataset}_summary"),
         }
 
-    df = pd.read_csv(path)
+    df = prepare_score_comparison_table(pd.read_csv(path))
     total_rows = int(len(df))
     slice_df = df.iloc[offset : offset + limit]
     columns = [str(c) for c in slice_df.columns.tolist()]
@@ -297,6 +314,7 @@ async def export_score_comparison(
     session_id: str = Query(...),
     dataset: str = Query("dev", pattern="^(dev|new)$"),
     reference_path: str | None = Query(default=None),
+    file_format: str = Query("csv", alias="format", pattern="^(csv|xlsx)$"),
 ):
     """
     Export merged comparison: platform score/predicted_proba vs reference predicted_proba.
@@ -319,14 +337,23 @@ async def export_score_comparison(
 
     try:
         comparison_df, summary = build_score_comparison(platform_path, ref_path)
+        comparison_df = prepare_score_comparison_table(comparison_df)
     except Exception as exc:
         return Response(content=str(exc), status_code=400)
 
-    out_path = session.get("score_comparison_path") or score_comparison_path(session_id, dataset)
-    comparison_df.to_csv(out_path, index=False)
-
     sess_dir = session_dir(session_id)
     os.makedirs(sess_dir, exist_ok=True)
+    if file_format == "xlsx":
+        out_path = os.path.join(sess_dir, f"score_comparison_{dataset}.xlsx")
+        comparison_df.to_excel(out_path, index=False)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        download_name = f"score_comparison_{dataset}.xlsx"
+    else:
+        out_path = session.get("score_comparison_path") or score_comparison_path(session_id, dataset)
+        comparison_df.to_csv(out_path, index=False)
+        media_type = "text/csv"
+        download_name = f"score_comparison_{dataset}.csv"
+
     summary_path = os.path.join(sess_dir, f"score_comparison_{dataset}_summary.json")
     with open(summary_path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
@@ -338,8 +365,55 @@ async def export_score_comparison(
 
     return FileResponse(
         out_path,
-        media_type="text/csv",
-        filename=f"score_comparison_{dataset}.csv",
+        media_type=media_type,
+        filename=download_name,
+    )
+
+
+@router.get("/processing-workbook")
+async def export_processing_workbook(
+    session_id: str = Query(...),
+    dataset: str = Query("dev", pattern="^(dev|new)$"),
+    reference_path: str | None = Query(default=None),
+):
+    """Export score comparison and model features as a two-sheet Excel workbook."""
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+
+    repro = session.get("reproducibility_result") or {}
+    features = repro.get("model_features_used") or []
+    features_df = pd.DataFrame({"#": range(1, len(features) + 1), "feature": features})
+
+    comparison_df = pd.DataFrame()
+    path = (
+        session.get(f"score_comparison_{dataset}_path")
+        or repro.get("score_comparison_path")
+        or score_comparison_path(session_id, dataset)
+    )
+    if path and os.path.exists(path):
+        comparison_df = prepare_score_comparison_table(pd.read_csv(path))
+    else:
+        platform_path = _resolve_processed_path(session, dataset)
+        ref_path = reference_path or session.get("reference_predictions_path") or DEFAULT_REFERENCE_PREDICTIONS
+        if platform_path and os.path.exists(platform_path) and os.path.exists(ref_path):
+            try:
+                comparison_df, _ = build_score_comparison(platform_path, ref_path)
+                comparison_df = prepare_score_comparison_table(comparison_df)
+            except Exception:
+                comparison_df = pd.DataFrame()
+
+    sess_dir = session_dir(session_id)
+    os.makedirs(sess_dir, exist_ok=True)
+    out_path = os.path.join(sess_dir, f"data_processing_{dataset}.xlsx")
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        comparison_df.to_excel(writer, sheet_name="Score Comparison", index=False)
+        features_df.to_excel(writer, sheet_name="Model Features", index=False)
+
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"data_processing_{dataset}.xlsx",
     )
 
 

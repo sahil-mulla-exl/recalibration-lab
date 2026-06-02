@@ -9,6 +9,7 @@ from backend.app.utils.diagnostics_metrics import (
     compute_csi_with_frozen_bins,
     compute_descriptive_stats,
     compute_missing_rate_drift,
+    compute_rank_order_analysis,
     compute_rob_monotonicity,
     compute_score_psi_frozen_deciles,
     find_optimal_thresholds,
@@ -57,6 +58,18 @@ def test_score_psi_and_rob_monotonicity() -> None:
     assert psi["psi"] >= 0
     assert rob["non_decreasing_count"] == 3
     assert rob["total_transitions"] == 4
+    assert len(rob["monotonicity_violations"]) == 1
+
+
+def test_rank_order_analysis_returns_decile_table() -> None:
+    rng = np.random.default_rng(42)
+    y = (rng.random(500) > 0.7).astype(int)
+    scores = rng.random(500)
+    out = compute_rank_order_analysis(y, scores)
+    assert len(out["deciles"]) >= 2
+    assert out["deciles"][0]["decile"] == 1
+    assert "event_rate" in out["deciles"][0]
+    assert "rank_order_break" in out
 
 
 def test_classification_metrics_and_thresholds() -> None:

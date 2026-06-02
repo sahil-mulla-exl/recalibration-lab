@@ -4,8 +4,11 @@ export { ChartPlot } from "@/components/diagnostics/ChartPlot";
 export {
   axisLabel,
   axisTick,
+  axisTickSpacing,
   cartesianGrid,
+  categoryChartMargin,
   chartMargin,
+  horizontalBarMargin,
   useChartTheme,
   type ChartTheme,
 } from "@/lib/chartTheme";

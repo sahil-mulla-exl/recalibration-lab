@@ -6,11 +6,12 @@ import { runAgent } from "@/services/api";
 import { SHOW_POLICY_GUARDRAILS } from "@/config/uiVisibility";
 import { usePersistedState, useSession } from "@/contexts/session";
 import { ChartCard, ChartPlot } from "@/components/charts";
+import { ChartFrame } from "@/components/diagnostics/ChartFrame";
+import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
+import { CARD_CHART_HEIGHT, CARD_CHART_HEIGHT_RADAR } from "@/lib/chartLayout";
 import {
-  axisLabel,
   axisTick,
   cartesianGrid,
-  chartLegendProps,
   chartMargin,
   chartTooltipProps,
   useChartTheme,
@@ -22,6 +23,7 @@ import {
   EvaluationMetricsTable,
   type EvaluationMetricRow,
 } from "@/components/evaluation/EvaluationMetricsTable";
+import { EvaluationRankOrderBreak } from "@/components/evaluation/EvaluationRankOrderBreak";
 import {
   Table,
   TableBody,
@@ -33,14 +35,14 @@ import {
 import {
   EVALUATION_DATA_KEYS,
   EVALUATION_SERIES,
-  evaluationChartLabel,
 } from "@/config/evaluation";
 import { buildEvaluationRadarRows, type RadarChartRow } from "@/lib/evaluationRadar";
 import type { ChartTheme } from "@/lib/chartTheme";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, Legend, ReferenceLine,
+  BarChart, Bar, Cell, ReferenceLine,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  LineChart, Line,
 } from "recharts";
 
 type EvaluationCohortKey = "champion_hold" | "champion_oos" | "recalibrated_oos";
@@ -278,6 +280,18 @@ export default function Evaluation() {
     [EVALUATION_DATA_KEYS.recalibratedOos]: recalOosRocPts[i]?.tpr ?? 0,
   }));
 
+  type KsPt = { population_pct: number; ks: number };
+  const holdKsPts = (report?.champion_hold_ks_curve || []) as KsPt[];
+  const oosKsPts = (report?.orig_ks_curve || []) as KsPt[];
+  const recalKsPts = (report?.new_ks_curve || []) as KsPt[];
+  const ksLen = Math.max(holdKsPts.length, oosKsPts.length, recalKsPts.length);
+  const ksData = Array.from({ length: ksLen }).map((_, i) => ({
+    population_pct: Number(holdKsPts[i]?.population_pct ?? oosKsPts[i]?.population_pct ?? recalKsPts[i]?.population_pct ?? 0),
+    [EVALUATION_DATA_KEYS.championHold]: Number(holdKsPts[i]?.ks ?? 0),
+    [EVALUATION_DATA_KEYS.championOos]: Number(oosKsPts[i]?.ks ?? 0),
+    [EVALUATION_DATA_KEYS.recalibratedOos]: Number(recalKsPts[i]?.ks ?? 0),
+  }));
+
   const impTable = ((report?.importance_table || []) as Array<{ feature: string; orig_importance: number; new_importance: number }>)
     .slice(0, 10);
   const selectedModelId = selectedModel?.model_id || "";
@@ -388,8 +402,6 @@ export default function Evaluation() {
     showLift,
   ]);
 
-  const chartLegend = { formatter: (value: string) => evaluationChartLabel(value) };
-
   const radarData = useMemo(() => {
     if (!report || !showMetricsForProblem) return [] as RadarChartRow[];
     const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
@@ -491,43 +503,36 @@ export default function Evaluation() {
                   title="Multi-Metric Radar"
                   subtitle="Each axis scales 0–100 from the max of all three cohorts on that metric (hover for raw values)."
                 >
-                  <ChartPlot style={{ height: 320 }}>
+                  <ChartFrame
+                    theme={theme}
+                    height={CARD_CHART_HEIGHT_RADAR}
+                    legend={[
+                      { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
+                      { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
+                      { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
+                    ]}
+                  >
                     <ResponsiveContainer width="100%" height="100%">
-                      <RadarChart data={radarData} outerRadius="72%">
+                      <RadarChart
+                        data={radarData}
+                        margin={chartMargin.radar}
+                        outerRadius="90%"
+                        cx="50%"
+                        cy="50%"
+                      >
                         <PolarGrid stroke={theme.radar.grid} />
-                        <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: theme.axis }} />
+                        <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: theme.axis }} tickLine={false} />
                         <PolarRadiusAxis
                           angle={90}
                           domain={[0, 100]}
                           tick={{ fontSize: 9, fill: theme.axis }}
                           stroke={theme.axisLine}
-                          label={axisLabel(theme, "Normalized score (0–100)", "insideLeft", { angle: -90, offset: 4 })}
+                          axisLine={false}
+                          tickCount={5}
                         />
-                        <Radar
-                          name={EVALUATION_SERIES.championHold}
-                          dataKey={EVALUATION_DATA_KEYS.championHold}
-                          stroke={theme.series.train}
-                          fill={theme.series.trainFill}
-                          fillOpacity={0.15}
-                          strokeWidth={2}
-                        />
-                        <Radar
-                          name={EVALUATION_SERIES.championOos}
-                          dataKey={EVALUATION_DATA_KEYS.championOos}
-                          stroke={theme.series.dev}
-                          fill={theme.series.devFill}
-                          fillOpacity={0.15}
-                          strokeWidth={2}
-                        />
-                        <Radar
-                          name={EVALUATION_SERIES.recalibratedOos}
-                          dataKey={EVALUATION_DATA_KEYS.recalibratedOos}
-                          stroke={theme.series.new}
-                          fill={theme.series.newFill}
-                          fillOpacity={0.15}
-                          strokeWidth={2}
-                        />
-                        <Legend {...chartLegendProps(theme, chartLegend)} />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} fill={theme.series.trainFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} fill={theme.series.devFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} fill={theme.series.newFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
                         <Tooltip
                           cursor={false}
                           content={(props) => (
@@ -540,7 +545,7 @@ export default function Evaluation() {
                         />
                       </RadarChart>
                     </ResponsiveContainer>
-                  </ChartPlot>
+                  </ChartFrame>
                 </ChartCard>
             )}
 
@@ -550,36 +555,69 @@ export default function Evaluation() {
                 title="ROC Curves"
                 subtitle="Receiver Operating Characteristic — higher curve = better discrimination"
               >
-                <ChartPlot style={{ height: 400 }}>
+                <ChartFrame
+                  theme={theme}
+                  height={CARD_CHART_HEIGHT}
+                  legend={[
+                    { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
+                    { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
+                    { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
+                  ]}
+                >
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={rocData}
-                      margin={{ ...chartMargin.labeledLeft, bottom: 80 }}
-                    >
+                    <AreaChart data={rocData} margin={chartMargin.xyTitles}>
                       <CartesianGrid {...cartesianGrid(theme)} />
-                      <XAxis
-                        dataKey="fpr"
-                        tick={axisTick(theme)}
-                        stroke={theme.axisLine}
-                        label={axisLabel(theme, "False positive rate", "insideBottom", { offset: -4 })}
-                      />
-                      <YAxis
-                        tick={axisTick(theme)}
-                        stroke={theme.axisLine}
-                        label={axisLabel(theme, "True positive rate", "insideLeft", { angle: -90, offset: 8 })}
-                      />
+                      <XAxis {...chartXAxis(theme, "False positive rate", { dataKey: "fpr", type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
+                      <YAxis {...chartYAxis(theme, "True positive rate", { type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
                       <Tooltip formatter={(v: number) => v.toFixed(3)} {...chartTooltipProps(theme, { cursor: "line" })} />
                       <ReferenceLine x={1} y={1} stroke={theme.axisLine} strokeDasharray="4 4" />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} strokeWidth={2} fill={theme.series.trainFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.championHold} />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} strokeWidth={2} fill={theme.series.devFill} fillOpacity={0.25} dot={false} name={EVALUATION_SERIES.championOos} />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} strokeWidth={2} fill={theme.series.newFill} fillOpacity={0.2} dot={false} name={EVALUATION_SERIES.recalibratedOos} />
-                      <Legend {...chartLegendProps(theme, { ...chartLegend, height: 48 })} />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={2} fill={theme.series.trainFill} fillOpacity={0.2} dot={false} legendType="none" />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={2} fill={theme.series.devFill} fillOpacity={0.25} dot={false} legendType="none" />
+                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={2} fill={theme.series.newFill} fillOpacity={0.2} dot={false} legendType="none" />
                     </AreaChart>
                   </ResponsiveContainer>
-                </ChartPlot>
+                </ChartFrame>
               </ChartCard>
             )}
           </div>
+
+          {problemType === "classification" && showKs && ksData.length > 0 && (
+            <ChartCard title="KS Curves" subtitle="Kolmogorov–Smirnov separation across cohorts (balanced axes)">
+              <ChartFrame
+                theme={theme}
+                height={CARD_CHART_HEIGHT}
+                legend={[
+                  { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
+                  { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
+                  { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
+                ]}
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={ksData} margin={chartMargin.xyTitles}>
+                    <CartesianGrid {...cartesianGrid(theme)} />
+                    <XAxis {...chartXAxis(theme, "Population (%)", { dataKey: "population_pct", type: "number", domain: [0, 100] })} />
+                    <YAxis {...chartYAxis(theme, "KS statistic", { type: "number", domain: [0, "auto"] })} />
+                    <Tooltip formatter={(v: number) => v.toFixed(4)} {...chartTooltipProps(theme, { cursor: "line" })} />
+                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={2} dot={false} legendType="none" />
+                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={2} dot={false} legendType="none" />
+                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={2} dot={false} legendType="none" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartFrame>
+            </ChartCard>
+          )}
+
+          {problemType === "classification" && report && (
+            <EvaluationRankOrderBreak
+              report={report}
+              theme={theme}
+              cohortColors={{
+                [EVALUATION_DATA_KEYS.championHold]: theme.series.train,
+                [EVALUATION_DATA_KEYS.championOos]: theme.series.dev,
+                [EVALUATION_DATA_KEYS.recalibratedOos]: theme.series.new,
+              }}
+            />
+          )}
 
           {/* Lift chart */}
           {problemType === "classification" && showLift && liftData.length > 0 && (
@@ -587,30 +625,28 @@ export default function Evaluation() {
               title="Cumulative Lift by Decile"
               subtitle="How many more responders does each model capture vs. random?"
             >
-              <ChartPlot style={{ height: 220 }}>
+              <ChartFrame
+                theme={theme}
+                height={CARD_CHART_HEIGHT}
+                legend={[
+                  { value: EVALUATION_SERIES.championHold, type: "square", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
+                  { value: EVALUATION_SERIES.championOos, type: "square", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
+                  { value: EVALUATION_SERIES.recalibratedOos, type: "square", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
+                ]}
+              >
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={liftData} margin={chartMargin.labeledLeft} barGap={3}>
+                  <BarChart data={liftData} margin={chartMargin.xyTitles} barGap={3}>
                     <CartesianGrid {...cartesianGrid(theme)} />
-                    <XAxis
-                      dataKey="decile"
-                      tick={axisTick(theme)}
-                      stroke={theme.axisLine}
-                      label={axisLabel(theme, "Score decile", "insideBottom", { offset: -4 })}
-                    />
-                    <YAxis
-                      tick={axisTick(theme)}
-                      stroke={theme.axisLine}
-                      label={axisLabel(theme, "Lift (×)", "insideLeft", { angle: -90, offset: 8 })}
-                    />
+                    <XAxis {...chartXAxis(theme, "Score decile", { dataKey: "decile" })} />
+                    <YAxis {...chartYAxis(theme, "Lift (×)", {})} />
                     <Tooltip formatter={(v: number) => `${v.toFixed(3)}x`} {...chartTooltipProps(theme)} />
                     <ReferenceLine y={1} stroke={theme.axisLine} strokeDasharray="4 4" label={{ value: "Baseline", fontSize: 9, fill: theme.axis }} />
-                    <Legend {...chartLegendProps(theme, chartLegend)} />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.championHold} />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.championOos} />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} fill={theme.series.newFill} stroke={theme.series.new} radius={[3, 3, 0, 0]} opacity={0.85} name={EVALUATION_SERIES.recalibratedOos} />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} fill={theme.series.newFill} stroke={theme.series.new} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
                   </BarChart>
                 </ResponsiveContainer>
-              </ChartPlot>
+              </ChartFrame>
             </ChartCard>
           )}
 
@@ -628,7 +664,7 @@ export default function Evaluation() {
                       <TableHead>Feature</TableHead>
                       <TableHead className="text-right">{EVALUATION_SERIES.championOos}</TableHead>
                       <TableHead className="text-right">{EVALUATION_SERIES.recalibratedOos}</TableHead>
-                      <TableHead className="text-right">Δ (Recal − Champion)</TableHead>
+                      <TableHead className="text-right">Δ (Recal − Production)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

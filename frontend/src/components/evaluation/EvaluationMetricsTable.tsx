@@ -72,7 +72,7 @@ export function EvaluationMetricsTable({ rows }: EvaluationMetricsTableProps) {
 
             <TableHead className="text-right">{EVALUATION_SERIES.recalibratedOos}</TableHead>
 
-            <TableHead className="text-right">Δ (Recal − Champion)</TableHead>
+            <TableHead className="text-right">Δ (Recal − Production)</TableHead>
 
           </TableRow>
 

@@ -6,8 +6,9 @@ import {
   Database, BarChart2, Cpu, GitCompare, Archive, Sparkles, ShieldAlert, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import { exportModel, exportLog, exportReport } from "@/services/api";
+import { recalibrationDecisionLabel } from "@/config/diagnostics";
 import { SHOW_POLICY_GUARDRAILS } from "@/config/uiVisibility";
-import { useSession, clearAllSessionState } from "@/contexts/session";
+import { usePersistedState, useSession, clearAllSessionState } from "@/contexts/session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -52,17 +53,19 @@ function ModelPassport({
   model,
   drift,
   comparison,
+  recalibrationDecision,
 }: {
   model: Record<string, string>;
   drift: Record<string, unknown>;
   comparison: Record<string, unknown>;
+  recalibrationDecision: string;
 }) {
   const aucDelta = ((comparison.new_auc as number) - (comparison.orig_auc as number)) * 100;
   const rows = [
     { label: "Model Name", value: String(model.model_name || "—") },
     { label: "Model ID", value: String(model.model_id || "—"), mono: true },
     { label: "Model Class", value: String(model.model_class || "—") },
-    { label: "Drift Verdict", value: String(drift.verdict || "—").toUpperCase() },
+    { label: "Drift Verdict", value: recalibrationDecision },
     { label: "Dev AUC", value: Number(drift.orig_auc || 0).toFixed(4), mono: true },
     { label: "New AUC (recalibrated)", value: Number(comparison.new_auc || 0).toFixed(4), mono: true, highlight: true },
     { label: "AUC Improvement", value: `${aucDelta > 0 ? "+" : ""}${aucDelta.toFixed(2)} pp`, mono: true, good: aucDelta > 0 },
@@ -138,11 +141,15 @@ function DownloadCard({ icon, label, desc, ext, size, url, filename, delay }: {
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function ExportPage() {
   const [, navigate] = useLocation();
-  const { sessionId, selectedModel, driftResult, evaluationResult } = useSession();
+  const { sessionId, selectedModel, driftResult, evaluationResult, recalibrationResult } = useSession();
+  const [selectedAction] = usePersistedState<string>("rcl:selectedRecommendedAction", "recal_opt");
 
   const model = (selectedModel as Record<string, string>) || {};
   const drift = (driftResult as Record<string, unknown>) || {};
   const evaluation = (evaluationResult as Record<string, unknown>) || {};
+  const recalAction =
+    String((recalibrationResult as Record<string, unknown> | null)?.selected_action || selectedAction || "");
+  const recalibrationDecision = recalibrationDecisionLabel(recalAction);
   const guardrails = (evaluation.policy_guardrails || null) as {
     status?: "pass" | "warn" | "block";
     failed_rules?: Array<{ description: string }>;
@@ -284,7 +291,12 @@ export default function ExportPage() {
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <Card className="p-5">
             <h3 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-3">Model Card</h3>
-            <ModelPassport model={model} drift={drift} comparison={evaluation} />
+            <ModelPassport
+              model={model}
+              drift={drift}
+              comparison={evaluation}
+              recalibrationDecision={recalibrationDecision}
+            />
           </Card>
         </motion.div>
       )}

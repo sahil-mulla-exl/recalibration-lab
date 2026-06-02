@@ -13,7 +13,7 @@ export function DiagnosticsChartLegend({ payload, theme, align = "center" }: Dia
 
   return (
     <ul
-      className={`recharts-legend-list flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 ${
+      className={`recharts-legend-list flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 mt-0.5 ${
         align === "left" ? "justify-start" : "justify-center"
       }`}
       style={{ color, fontSize: 12 }}

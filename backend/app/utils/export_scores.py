@@ -103,3 +103,13 @@ def build_score_comparison(
     merged["score_diff"] = diff
     merged["score_abs_diff"] = diff.abs()
     return merged, summary
+
+
+def prepare_score_comparison_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort by id ascending and omit redundant predicted_proba for UI/export."""
+    out = df.copy()
+    if "id" in out.columns:
+        out = out.sort_values("id", ascending=True, kind="mergesort")
+    elif "row_index" in out.columns:
+        out = out.sort_values("row_index", ascending=True, kind="mergesort")
+    return out.drop(columns=["predicted_proba"], errors="ignore")

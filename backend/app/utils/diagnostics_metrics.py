@@ -327,18 +327,74 @@ def compute_decile_event_rates(y_true: np.ndarray, y_score: np.ndarray) -> List[
 def compute_rob_monotonicity(decile_rates: Sequence[float]) -> Dict[str, Any]:
     rates = list(decile_rates)
     if len(rates) < 2:
-        return {"non_decreasing_count": 0, "total_transitions": 0, "break_indices": []}
+        return {
+            "non_decreasing_count": 0,
+            "total_transitions": 0,
+            "break_indices": [],
+            "monotonicity_violations": [],
+        }
     break_indices: List[int] = []
+    violations: List[Dict[str, int]] = []
     count = 0
     for idx in range(len(rates) - 1):
         if rates[idx + 1] >= rates[idx]:
             count += 1
         else:
-            break_indices.append(idx + 1)
+            break_indices.append(idx + 2)
+            violations.append({"from_decile": idx + 1, "to_decile": idx + 2})
     return {
         "non_decreasing_count": count,
         "total_transitions": len(rates) - 1,
         "break_indices": break_indices,
+        "monotonicity_violations": violations,
+    }
+
+
+def compute_decile_rank_order_rows(y_true: np.ndarray, y_score: np.ndarray) -> List[Dict[str, Any]]:
+    """Decile table for rank-order analysis (decile 1 = lowest score / lowest risk)."""
+    df = pd.DataFrame({"y": np.asarray(y_true, dtype=float), "score": np.asarray(y_score, dtype=float)})
+    if df.empty:
+        return []
+    df = df.sort_values("score", ascending=True).reset_index(drop=True)
+    df["decile"] = pd.qcut(df.index, q=10, labels=False, duplicates="drop")
+    total_rate = float(df["y"].mean())
+    total_events = int(df["y"].sum())
+    rows: List[Dict[str, Any]] = []
+    cum_events = 0
+    for d in sorted(df["decile"].dropna().unique()):
+        subset = df[df["decile"] == d]
+        count = int(len(subset))
+        events = int(subset["y"].sum())
+        non_events = max(0, count - events)
+        rate = float(subset["y"].mean()) if count else 0.0
+        avg_score = float(subset["score"].mean()) if count else 0.0
+        lift = rate / max(total_rate, 1e-6)
+        cum_events += events
+        cum_rate = cum_events / max(total_events, 1)
+        rows.append(
+            {
+                "decile": int(d) + 1,
+                "count": count,
+                "events": events,
+                "non_events": non_events,
+                "event_rate": round(rate, 6),
+                "avg_score": round(avg_score, 6),
+                "lift": round(float(lift), 4),
+                "cum_event_rate": round(float(cum_rate), 4),
+            }
+        )
+    return rows
+
+
+def compute_rank_order_analysis(y_true: np.ndarray, y_score: np.ndarray) -> Dict[str, Any]:
+    """Full rank-order payload: decile rows, event rates (%), and monotonicity summary."""
+    deciles = compute_decile_rank_order_rows(y_true, y_score)
+    decile_rates = compute_decile_event_rates(y_true, y_score)
+    rank_order_break = compute_rob_monotonicity(decile_rates)
+    return {
+        "deciles": deciles,
+        "decile_rates": decile_rates,
+        "rank_order_break": rank_order_break,
     }
 
 

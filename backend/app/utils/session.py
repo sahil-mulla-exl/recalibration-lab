@@ -24,6 +24,7 @@ def create_session() -> str:
         "uploaded_model_hyperparameters": None,
         "preprocess_path": None,
         "features_path": None,
+        "data_dictionary_path": None,
         "dev_scores_path": None,
         # agent results
         "inception_result": None,

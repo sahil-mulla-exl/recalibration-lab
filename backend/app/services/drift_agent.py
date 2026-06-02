@@ -151,7 +151,7 @@ class DriftDiagnosticsAgent(Agent):
         super().__init__("drift", session_id, queue)
         self._declare_tasks(
             [
-                {"id": "load_context", "name": "Load datasets, model and governance"},
+                {"id": "load_context", "name": "Load datasets, model and threshold"},
                 {"id": "compute_data_drift", "name": "Compute data drift diagnostics"},
                 {"id": "compute_concept_drift", "name": "Compute concept drift diagnostics"},
                 {"id": "compute_performance_drift", "name": "Compute performance drift diagnostics"},
@@ -327,21 +327,21 @@ class DriftDiagnosticsAgent(Agent):
 
         target_col = session.get("target_variable") or session.get("processed_target_column") or TARGET_COL
         outcome_col = session.get("outcome_variable") or session.get("processed_dev_outcome_column") or target_col
-        train_target_col = outcome_col if outcome_col in train_df.columns else target_col
-        dev_target_col = outcome_col if outcome_col in dev_oos_df.columns else target_col
-        if outcome_col in perf_new_df.columns:
-            perf_new_target_col = outcome_col
-        elif target_col in perf_new_df.columns:
+        train_target_col = target_col if target_col in train_df.columns else outcome_col
+        dev_target_col = target_col if target_col in dev_oos_df.columns else outcome_col
+        if target_col in perf_new_df.columns:
             perf_new_target_col = target_col
+        elif outcome_col in perf_new_df.columns:
+            perf_new_target_col = outcome_col
         elif "predicted_outcome" in perf_new_df.columns:
             perf_new_target_col = "predicted_outcome"
         else:
             raise ValueError("New Validation Sample missing target/outcome columns")
 
-        if outcome_col in new_df.columns:
-            new_target_col = outcome_col
-        elif target_col in new_df.columns:
+        if target_col in new_df.columns:
             new_target_col = target_col
+        elif outcome_col in new_df.columns:
+            new_target_col = outcome_col
         elif "predicted_outcome" in new_df.columns:
             new_target_col = "predicted_outcome"
         else:

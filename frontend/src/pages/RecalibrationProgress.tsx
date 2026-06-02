@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, ArrowLeft, Zap, AlertTriangle, CheckCircle, Cpu, GitBranch, Sliders, RotateCcw } from "lucide-react";
+import { ArrowRight, ArrowLeft, Zap, AlertTriangle, CheckCircle, GitBranch, Sliders, RotateCcw, Cpu } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { DIAGNOSTIC_ACTION_MESSAGES } from "@/config/diagnostics";
+import { DIAGNOSTIC_ACTION_MESSAGES, usesHyperparameterOptimization } from "@/config/diagnostics";
 import {
   buildDefaultSpace,
   hpParamsForModel,
@@ -24,6 +24,7 @@ import { ChartCard, ChartPlot } from "@/components/charts";
 import {
   axisLabel,
   axisTick,
+  axisTickSpacing,
   cartesianGrid,
   chartMargin,
   chartTooltipProps,
@@ -38,12 +39,6 @@ const MODEL_CLASSES = [
   { id: "XGBoost", icon: <Zap className="h-4 w-4" />, desc: "Gradient boosted trees" },
   { id: "LightGBM", icon: <GitBranch className="h-4 w-4" />, desc: "Leaf-wise growth" },
   { id: "Logistic", icon: <Sliders className="h-4 w-4" />, desc: "Logistic regression" },
-];
-
-const HP_METHODS = [
-  { id: "random",   label: "Random Search",   desc: "30 i.i.d. trials" },
-  { id: "bayesian", label: "Bayesian Search", desc: "TPE-style adaptive" },
-  { id: "grid",     label: "Grid Search",     desc: "Exhaustive sweep" },
 ];
 
 type RecommendedActionId = "no_action" | "recal_simple" | "recal_opt" | "redevelop";
@@ -105,8 +100,9 @@ export default function RecalibrationProgress() {
     }
   });
   const autoStartedRef = useRef(false);
-  const needsHpConfig = selectedAction === "recal_opt" || selectedAction === "redevelop";
-  const showConfig = !running && !done && !skipConfig;
+  const needsHpConfig = usesHyperparameterOptimization(selectedAction);
+  const showBestHyperparameters = needsHpConfig;
+  const showConfig = !running && !done;
   const problemType = String(selectedModel?.problem_type || "classification").toLowerCase().startsWith("reg")
     ? "regression"
     : "classification";
@@ -218,43 +214,6 @@ export default function RecalibrationProgress() {
     await runAgent(sessionId, "recalibration");
   };
 
-  useEffect(() => {
-    if (!skipConfig || autoStartedRef.current || !sessionId || done || running) return;
-    if (selectedAction !== "recal_simple" && selectedAction !== "recal_opt") {
-      setSkipConfig(false);
-      try {
-        localStorage.removeItem("rcl:autoStartRecalibration");
-      } catch {
-        // ignore
-      }
-      return;
-    }
-    autoStartedRef.current = true;
-    try {
-      localStorage.removeItem("rcl:autoStartRecalibration");
-    } catch {
-      // ignore
-    }
-    const effectiveHpMethod = selectedAction === "recal_opt" ? inventoryHpMethod : "none";
-    const effectiveCvFolds = selectedAction === "recal_opt" ? (optimizationInput.cvFolds ?? 5) : 1;
-    const effectiveSearchSpace =
-      selectedAction === "recal_opt" ? diagnosticsSearchSpace() : {};
-    void startAgent({
-      drops: [],
-      hpMethod: effectiveHpMethod,
-      cvFolds: effectiveCvFolds,
-      searchSpace: effectiveSearchSpace,
-    }).catch(() => setSkipConfig(false));
-  }, [
-    skipConfig,
-    sessionId,
-    done,
-    running,
-    selectedAction,
-    inventoryHpMethod,
-    optimizationInput.cvFolds,
-    inheritedClass,
-  ]);
 
   const handleCompleted = (r: unknown) => {
     const res = r as Record<string, unknown>;
@@ -383,75 +342,25 @@ export default function RecalibrationProgress() {
               </div>
             </Card>
 
-            {/* Model config */}
             <Card className="p-5 space-y-5">
-              <h2 className="font-semibold text-sm">Model Configuration</h2>
-
-              {/* Model class — locked, inherited from inventory */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Model Class</p>
-                  <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted/40 border border-border text-muted-foreground">
-                    Locked · from inventory
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl border border-primary/40 bg-primary/5 ring-1 ring-primary/20">
-                  <div className="h-9 w-9 rounded-lg bg-primary/20 text-primary flex items-center justify-center shrink-0">
-                    {inheritedClassMeta.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-primary">{inheritedClassMeta.id}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {inheritedClassMeta.desc} · inherited from {selectedModel?.model_name || selectedModel?.model_id || "selected model"}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted-foreground/80 mt-2">
-                  Recalibration must use the same algorithm as the original model. To change the model class, choose a different model from the inventory.
-                </p>
-              </div>
+              <h2 className="font-semibold text-sm">Recalibration settings</h2>
 
               {selectedAction === "recal_simple" && (
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-1">
                   <p className="text-xs font-semibold text-foreground">Hyperparameters</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     {DIAGNOSTIC_ACTION_MESSAGES.recal_same_hp.detail} Values are read from the uploaded champion
-                    .pkl file — no search grid is applied.
+                    .pkl file — no search grid is applied. Model class and search method are taken from inventory.
                   </p>
                 </div>
               )}
 
-              {/* HP method — only when optimisation is enabled */}
               {needsHpConfig && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Search Method</p>
-                  <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted/40 border border-border text-muted-foreground">
-                    Default · from inventory
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {HP_METHODS.map((m) => (
-                    <button key={m.id} onClick={() => setHpMethod(m.id as OptimizationMethod)}
-                      className={`flex flex-col items-start gap-2 p-3 rounded-xl border transition-all ${
-                        hpMethod === m.id
-                          ? "bg-primary/10 border-primary/50 ring-1 ring-primary/30"
-                          : "bg-muted/10 border-border hover:border-primary/30"
-                      }`}>
-                      <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${hpMethod === m.id ? "bg-primary/20 text-primary" : "bg-muted/30 text-muted-foreground"}`}>
-                        <Cpu className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="text-left">
-                        <p className={`text-xs font-semibold ${hpMethod === m.id ? "text-primary" : ""}`}>{m.label}</p>
-                        <p className="text-[10px] text-muted-foreground leading-tight">{m.desc}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Model class ({inheritedClass}) and search method ({inventoryHpMethod}) are inherited from inventory.
+              </p>
               )}
 
-              {/* Hyperparameter search space (per technique) */}
               {needsHpConfig && (
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -672,9 +581,16 @@ export default function RecalibrationProgress() {
             </div>
           </div>
 
-          {/* Best params */}
+          {/* Model / HP params */}
           <Card className="p-5">
-            <h3 className="font-semibold text-sm mb-3">Best Hyperparameters</h3>
+            <h3 className="font-semibold text-sm mb-3">
+              {showBestHyperparameters ? "Best Hyperparameters" : "Model Parameters"}
+            </h3>
+            {!showBestHyperparameters && (
+              <p className="text-xs text-muted-foreground mb-3">
+                {DIAGNOSTIC_ACTION_MESSAGES.recal_same_hp.summary}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {Object.entries((result.best_params as Record<string, unknown>) || {}).map(([k, v]) => (
                 <div key={k} className="bg-muted/20 border border-border rounded-lg px-3 py-2">
@@ -686,30 +602,33 @@ export default function RecalibrationProgress() {
           </Card>
 
           {/* HP tuning trace — area chart */}
-          {trialData.length > 0 && (
+          {needsHpConfig && trialData.length > 1 && (
             <ChartCard
               title="Hyperparameter Tuning Trace"
               subtitle={`${trialData.length} trials · best: ${bestScore.toFixed(4)}`}
             >
               <ChartPlot style={{ height: 200 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trialData} margin={chartMargin.labeledLeft}>
+                  <AreaChart data={trialData} margin={chartMargin.xyTitles}>
                     <CartesianGrid {...cartesianGrid(theme)} />
                     <XAxis
                       dataKey="trial"
                       tick={axisTick(theme)}
+                      tickMargin={axisTickSpacing.x.tickMargin}
                       stroke={theme.axisLine}
-                      label={axisLabel(theme, "Trial #", "insideBottom", { offset: -4 })}
+                      label={axisLabel(theme, "Trial #", "insideBottom")}
                     />
                     <YAxis
                       domain={["auto", "auto"]}
                       tick={axisTick(theme)}
+                      tickMargin={axisTickSpacing.y.tickMargin}
+                      width={axisTickSpacing.y.width}
                       stroke={theme.axisLine}
                       label={axisLabel(
                         theme,
                         problemType === "regression" ? "Validation R²" : "Validation AUC",
-                        "insideLeft",
-                        { angle: -90, offset: 8 },
+                        "left",
+                        { angle: -90, offset: 10 },
                       )}
                     />
                     <Tooltip formatter={(v: number) => v.toFixed(4)} {...chartTooltipProps(theme, { cursor: "line" })} />

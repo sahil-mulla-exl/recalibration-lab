@@ -235,7 +235,7 @@ class RecalibrationAgent(Agent):
         super().__init__("recalibration", session_id, queue)
         self._declare_tasks([
             {"id": "apply_variable_drops",  "name": "Apply variable drops"},
-            {"id": "prepare_training_data", "name": "Prepare train and OOT feature matrices"},
+            {"id": "prepare_training_data", "name": "Prepare train and Hold-out feature matrices"},
             {"id": "setup_hp_search",       "name": "Set up hyperparameter search"},
             {"id": "run_hp_tuning",         "name": "Run hyperparameter tuning (30 trials)"},
             {"id": "train_final_model",     "name": "Train final model on best hyperparameters"},
@@ -269,6 +269,19 @@ class RecalibrationAgent(Agent):
         seeded_from_uploaded_model = skip_tuning and bool(base_uploaded_params)
         target_col = session.get("target_variable") or session.get("processed_target_column") or TARGET_COL
         outcome_col = session.get("outcome_variable") or session.get("processed_dev_outcome_column") or target_col
+        # Training labels must use the actual target (binary/regression outcome), not prediction/score columns.
+        def _train_label_col(df: pd.DataFrame) -> str:
+            if target_col in df.columns:
+                return target_col
+            if outcome_col in df.columns and outcome_col != target_col:
+                series = pd.to_numeric(df[outcome_col], errors="coerce").dropna()
+                if len(series) > 0:
+                    uniq = set(series.unique().tolist())
+                    if uniq.issubset({0, 1, 0.0, 1.0}) or len(uniq) <= 20:
+                        return outcome_col
+            if TARGET_COL in df.columns:
+                return TARGET_COL
+            return outcome_col if outcome_col in df.columns else target_col
 
         processed_dev_path = session.get("processed_dev_path")
         processed_hold_path = session.get("processed_hold_path")
@@ -283,7 +296,7 @@ class RecalibrationAgent(Agent):
         else:
             schema_df = read_tabular_dataframe(dev_path)
             await self.log("Processed dev artifact missing — using raw dev upload (may use more memory)")
-        dev_outcome_col = outcome_col if outcome_col in schema_df.columns else target_col
+        dev_outcome_col = _train_label_col(schema_df)
         if dev_outcome_col not in schema_df.columns:
             await self.task_failed(
                 "apply_variable_drops",
@@ -330,7 +343,7 @@ class RecalibrationAgent(Agent):
             if processed_hold_path and os.path.exists(processed_hold_path):
                 oot_proc = pd.read_parquet(processed_hold_path)
                 oot_source = "uploaded_hold_processed"
-                hold_outcome_col = outcome_col if outcome_col in oot_proc.columns else target_col
+                hold_outcome_col = _train_label_col(oot_proc)
                 if hold_outcome_col not in oot_proc.columns:
                     await self.task_failed(
                         "prepare_training_data",
@@ -356,7 +369,7 @@ class RecalibrationAgent(Agent):
                 oot_df, oot_source = load_oot_dataframe(
                     session, dev_path, data_dir=data_dir, prefer_processed=False
                 )
-                hold_outcome_col = outcome_col if outcome_col in oot_df.columns else target_col
+                hold_outcome_col = _train_label_col(oot_df)
                 if hold_outcome_col not in oot_df.columns:
                     await self.task_failed(
                         "prepare_training_data",
@@ -381,7 +394,7 @@ class RecalibrationAgent(Agent):
             oot_df, oot_source = load_oot_dataframe(
                 session, dev_path, data_dir=data_dir, prefer_processed=False
             )
-            hold_outcome_col = outcome_col if outcome_col in oot_df.columns else target_col
+            hold_outcome_col = _train_label_col(oot_df)
             if hold_outcome_col not in oot_df.columns:
                 await self.task_failed(
                     "prepare_training_data",

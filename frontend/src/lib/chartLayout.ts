@@ -1,7 +1,10 @@
+/** Standard plot height inside diagnostics / evaluation cards (px). */
+export const CARD_CHART_HEIGHT = 340;
+export const CARD_CHART_HEIGHT_RADAR = 400;
+
 /** Layout helpers for horizontal feature bar charts (IV, AUC, SHAP). */
 
-export function featureLabelWidth(features: string[]): number {
-  if (features.length === 0) return 160;
+export function featureLabelWidth(features: string[]): number {  if (features.length === 0) return 160;
   const longest = Math.max(...features.map((f) => String(f).length));
   return Math.min(200, Math.max(112, longest * 6));
 }
@@ -28,13 +31,14 @@ export function categoryAxisLayout(
   const angleThreshold = opts?.angleThreshold ?? 10;
   const longLabelChars = opts?.longLabelChars ?? 14;
   const angled = count > angleThreshold || maxLen > longLabelChars;
-  const height = angled ? 38 : 20;
+  const height = angled ? 44 : 28;
   return {
     angled,
     height,
     angle: angled ? -25 : 0,
     textAnchor: angled ? ("end" as const) : ("middle" as const),
-    marginBottom: height + 4,
+    /** Space for angled ticks plus X-axis title below */
+    marginBottom: height + 20,
   };
 }
 

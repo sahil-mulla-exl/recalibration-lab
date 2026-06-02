@@ -51,6 +51,7 @@ async def clear_model_state(body: dict):
             "uploaded_model_feature_names": None,
             "preprocess_path": None,
             "features_path": None,
+            "data_dictionary_path": None,
             "dev_scores_path": None,
             "processed_dev_path": None,
             "processed_new_path": None,

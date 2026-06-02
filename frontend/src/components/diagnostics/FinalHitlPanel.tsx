@@ -1,15 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
 import { Card } from "@/components/ui/card";
 
-import { HpSearchSpaceEditor } from "@/components/recalibration/HpSearchSpaceEditor";
-
 import { SignalGrid } from "@/components/diagnostics/SignalGrid";
 import { DIAGNOSTIC_ACTION_MESSAGES, DIAGNOSTIC_FINAL_ACTIONS } from "@/config/diagnostics";
-
-import { buildDefaultSpace, type SearchSpaceValue } from "@/config/recalibrationHp";
 
 import type { DiagnosticActionId } from "@/types/diagnostics";
 
@@ -70,20 +66,6 @@ export function FinalHitlPanel({
   const defaultAction = allowedActions.includes(recommended) ? recommended : "recal_with_hp_opt";
 
   const [action, setAction] = useState<DiagnosticActionId>(defaultAction);
-
-  const [searchSpace, setSearchSpace] = useState<SearchSpaceValue>(() => buildDefaultSpace(modelClass));
-
-  const [cvFolds, setCvFolds] = useState(5);
-
-
-
-  useEffect(() => {
-
-    setSearchSpace(buildDefaultSpace(modelClass));
-
-  }, [modelClass]);
-
-
 
   const descriptions: Record<DiagnosticActionId, string> = {
     no_action: "Accept current model performance and continue unchanged.",
@@ -192,73 +174,18 @@ export function FinalHitlPanel({
 
 
       {action === "recal_with_hp_opt" && (
-        <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3 bg-slate-50 dark:bg-slate-900">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">What happens next</p>
-            <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-              {DIAGNOSTIC_ACTION_MESSAGES.recal_with_hp_opt.detail}
-            </p>
-          </div>
-          {optimizationMethodLabel && (
-            <p className="text-xs text-gray-600 dark:text-gray-300">
-              Search method from inventory: <span className="font-medium">{optimizationMethodLabel}</span>
-            </p>
-          )}
-
-          <HpSearchSpaceEditor
-
-            modelClass={modelClass}
-
-            searchSpace={searchSpace}
-
-            onChange={setSearchSpace}
-
-            compact
-
-          />
-
-          <div>
-
-            <div className="flex items-center justify-between mb-1.5">
-
-              <p className="text-xs font-medium text-gray-700 dark:text-gray-200">Cross-validation folds</p>
-
-              <span className="text-xs font-mono font-semibold text-primary">{cvFolds}</span>
-
-            </div>
-
-            <input
-
-              type="range"
-
-              min={2}
-
-              max={10}
-
-              step={1}
-
-              value={cvFolds}
-
-              onChange={(e) => setCvFolds(Number(e.target.value))}
-
-              className="w-full accent-primary"
-
-            />
-
-            <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400 mt-1">
-
-              <span>2 (fast)</span>
-
-              <span>5</span>
-
-              <span>10 (thorough)</span>
-
-            </div>
-
-          </div>
-
+        <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2 bg-slate-50 dark:bg-slate-900">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">What happens next</p>
+          <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+            {DIAGNOSTIC_ACTION_MESSAGES.recal_with_hp_opt.detail}
+          </p>
+          <p className="text-xs text-gray-600 dark:text-gray-300">
+            Hyperparameter search space, cross-validation folds, and feature drops are configured on the Recalibration
+            page before the agent runs. Model class and search method come from your inventory selection (
+            <span className="font-medium">{modelClass}</span>
+            {optimizationMethodLabel ? ` · ${optimizationMethodLabel}` : ""}).
+          </p>
         </div>
-
       )}
 
 
@@ -268,17 +195,7 @@ export function FinalHitlPanel({
         <Button
 
           onClick={() => {
-
-            const options: FinalDecisionOptions | undefined =
-
-              action === "recal_with_hp_opt"
-
-                ? { searchSpace, cvFolds }
-
-                : undefined;
-
-            onConfirm(action, recommendation.rationale ?? "Confirmed diagnostic decision", options);
-
+            onConfirm(action, recommendation.rationale ?? "Confirmed diagnostic decision");
           }}
 
         >

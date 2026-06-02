@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
-import { DATA_SUBTABS } from "@/config/diagnostics";
 import { CategoricalDriftRow } from "@/components/diagnostics/CategoricalDriftRow";
 import { ChartCard } from "@/components/diagnostics/ChartCard";
 import { CsiRankedChart } from "@/components/diagnostics/CsiRankedChart";
 import { DistributionExplorerCharts } from "@/components/diagnostics/DistributionExplorerCharts";
 import { MissingRateTable } from "@/components/diagnostics/MissingRateTable";
-import { SubTabBar } from "@/components/diagnostics/SubTabBar";
 import { useSession } from "@/contexts/session";
 import { downloadDiagnosticsReportFile } from "@/services/api";
 import { DescriptiveStatsTable } from "@/components/diagnostics/DescriptiveStatsTable";
@@ -18,12 +16,11 @@ type DataDriftTabProps = {
 
 export function DataDriftTab({ report }: DataDriftTabProps) {
   const { sessionId } = useSession();
-  const [subtab, setSubtab] = useState<string>("target");
   const [csiTopN, setCsiTopN] = useState<number>(15);
   const [selectedDistFeature, setSelectedDistFeature] = useState<string>("");
   const [selectedTargetBreakdown, setSelectedTargetBreakdown] = useState<string>("none");
   const [descView, setDescView] = useState<"raw" | "processed">("raw");
-  const [downloadBusy, setDownloadBusy] = useState<"" | "data" | "descriptive">("");
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const data = (report.data_drift ?? {}) as Record<string, unknown>;
   const datasets = (report.datasets ?? {}) as Record<string, unknown>;
   const target = (data.target_drift ?? {}) as Record<string, unknown>;
@@ -173,28 +170,83 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <SubTabBar value={subtab} onValueChange={setSubtab} items={DATA_SUBTABS} />
-        <button
-          type="button"
-          className="h-8 rounded border px-3 text-xs bg-white dark:bg-slate-900 disabled:opacity-60"
-          disabled={!sessionId || downloadBusy !== ""}
-          onClick={async () => {
-            if (!sessionId) return;
-            try {
-              setDownloadBusy("data");
-                  await downloadDiagnosticsReportFile(sessionId, "data", report);
-            } finally {
-              setDownloadBusy("");
-            }
-          }}
+      <ChartCard
+          title="Descriptive statistics"
+          subtitle={`${driftCompareSubtitle()}, with raw/processed toggle`}
+          actions={(
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded border p-0.5">
+                <button
+                  type="button"
+                  className={`px-3 py-1 text-xs rounded ${descView === "raw" ? "bg-secondary" : ""}`}
+                  onClick={() => setDescView("raw")}
+                >
+                  Raw
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1 text-xs rounded ${descView === "processed" ? "bg-secondary" : ""}`}
+                  onClick={() => setDescView("processed")}
+                >
+                  Processed
+                </button>
+              </div>
+              <button
+                type="button"
+                className="h-8 rounded border px-2 text-xs bg-white dark:bg-slate-900 disabled:opacity-60"
+                onClick={async () => {
+                  if (!sessionId) return;
+                  try {
+                    setDownloadBusy(true);
+                    await downloadDiagnosticsReportFile(sessionId, "descriptive", report);
+                  } finally {
+                    setDownloadBusy(false);
+                  }
+                }}
+                disabled={!sessionId || downloadBusy}
+              >
+                {downloadBusy ? "Downloading..." : "Excel (Raw + Processed sheets)"}
+              </button>
+            </div>
+          )}
         >
-          {downloadBusy === "data" ? "Downloading..." : "Download report"}
-        </button>
-      </div>
+          <DescriptiveStatsTable rows={rawRows} />
+        </ChartCard>
 
-      {subtab === "target" && (
-        <>
+        <div className="space-y-3">
+          <ChartCard title="Cardinality change — categorical features" subtitle={`New/lost category monitoring — raw ${driftCompareSubtitle()}`}>
+            <div className="flex flex-wrap items-center gap-2 text-xs mb-3">
+              <span className="px-2 py-1 rounded border bg-red-500/10 border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 font-semibold uppercase tracking-wide">
+                {cardinalityCounts.newCategory} New Category
+              </span>
+              <span className="px-2 py-1 rounded border bg-amber-500/10 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-300 font-semibold uppercase tracking-wide">
+                {cardinalityCounts.lostCategory} Lost Category
+              </span>
+              <span className="px-2 py-1 rounded border bg-emerald-500/10 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-300 font-semibold uppercase tracking-wide">
+                {cardinalityCounts.stable} Stable
+              </span>
+              <span className="px-2 py-1 rounded border bg-blue-500/10 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wide">
+                Auto-Flagged
+              </span>
+            </div>
+            <div className="space-y-2">
+              {cardinalityRows.map(([feature, vals]) => (
+                <CategoricalDriftRow
+                  key={feature}
+                  feature={feature}
+                  trainCategories={vals.train_categories ?? []}
+                  newCategories={vals.new_categories ?? []}
+                  newOnly={vals.new_only ?? []}
+                  lost={vals.lost ?? []}
+                />
+              ))}
+            </div>
+          </ChartCard>
+          <ChartCard title="Missing Rate Drift" subtitle="Feature-wise table with severity filter">
+            <MissingRateTable rows={missingRows} />
+          </ChartCard>
+        </div>
+
           <ChartCard
             title="Target Drift"
             subtitle={`Event rate comparison — ${driftCompareSubtitle()}`}
@@ -234,11 +286,7 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
               />
             </div>
           </ChartCard>
-        </>
-      )}
 
-      {subtab === "feature" && (
-        <>
           <ChartCard
             title="Feature Drift (CSI)"
             subtitle="CSI ranked by model features with governance severity"
@@ -282,89 +330,6 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
               contributionRows={contributionRows}
             />
           </ChartCard>
-        </>
-      )}
-
-      {subtab === "cardinality" && (
-        <div className="space-y-3">
-          <ChartCard title="Cardinality change — categorical features" subtitle={`New/lost category monitoring — raw ${driftCompareSubtitle()}`}>
-            <div className="flex flex-wrap items-center gap-2 text-xs mb-3">
-              <span className="px-2 py-1 rounded border bg-red-500/10 border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.newCategory} New Category
-              </span>
-              <span className="px-2 py-1 rounded border bg-amber-500/10 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.lostCategory} Lost Category
-              </span>
-              <span className="px-2 py-1 rounded border bg-emerald-500/10 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.stable} Stable
-              </span>
-              <span className="px-2 py-1 rounded border bg-blue-500/10 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wide">
-                Auto-Flagged
-              </span>
-            </div>
-            <div className="space-y-2">
-              {cardinalityRows.map(([feature, vals]) => (
-                <CategoricalDriftRow
-                  key={feature}
-                  feature={feature}
-                  trainCategories={vals.train_categories ?? []}
-                  newCategories={vals.new_categories ?? []}
-                  newOnly={vals.new_only ?? []}
-                  lost={vals.lost ?? []}
-                />
-              ))}
-            </div>
-          </ChartCard>
-          <ChartCard title="Missing Rate Drift" subtitle="Feature-wise table with severity filter">
-            <MissingRateTable rows={missingRows} />
-          </ChartCard>
-        </div>
-      )}
-
-      {subtab === "descriptive" && (
-        <ChartCard
-          title="Descriptive statistics"
-          subtitle={`${driftCompareSubtitle()}, with raw/processed toggle`}
-          actions={(
-            <div className="flex items-center gap-2">
-              <div className="inline-flex rounded border p-0.5">
-                <button
-                  type="button"
-                  className={`px-3 py-1 text-xs rounded ${descView === "raw" ? "bg-secondary" : ""}`}
-                  onClick={() => setDescView("raw")}
-                >
-                  Raw
-                </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1 text-xs rounded ${descView === "processed" ? "bg-secondary" : ""}`}
-                  onClick={() => setDescView("processed")}
-                >
-                  Processed
-                </button>
-              </div>
-              <button
-                type="button"
-                className="h-8 rounded border px-2 text-xs bg-white dark:bg-slate-900 disabled:opacity-60"
-                onClick={async () => {
-                  if (!sessionId) return;
-                  try {
-                    setDownloadBusy("descriptive");
-                    await downloadDiagnosticsReportFile(sessionId, "descriptive", report);
-                  } finally {
-                    setDownloadBusy("");
-                  }
-                }}
-                disabled={!sessionId || downloadBusy !== ""}
-              >
-                {downloadBusy === "descriptive" ? "Downloading..." : "Excel (Raw + Processed sheets)"}
-              </button>
-            </div>
-          )}
-        >
-          <DescriptiveStatsTable rows={rawRows} />
-        </ChartCard>
-      )}
     </div>
   );
 }

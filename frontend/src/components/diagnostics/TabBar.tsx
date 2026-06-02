@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 type TabItem = { id: string; label: string };
 
 type TabBarProps = {
@@ -8,17 +10,21 @@ type TabBarProps = {
 
   items: readonly TabItem[];
 
+  trailing?: ReactNode;
+
 };
 
 
 
-export function TabBar({ value, onValueChange, items }: TabBarProps) {
+export function TabBar({ value, onValueChange, items, trailing }: TabBarProps) {
 
   return (
 
     <div className="bg-white/90 dark:bg-slate-900/80 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 backdrop-blur">
 
-      <div className="flex gap-2 overflow-x-auto">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+
+      <div className="flex gap-2 overflow-x-auto min-w-0 flex-1">
 
         {items.map((item) => (
 
@@ -47,6 +53,10 @@ export function TabBar({ value, onValueChange, items }: TabBarProps) {
           </button>
 
         ))}
+
+      </div>
+
+      {trailing ? <div className="shrink-0 ml-auto">{trailing}</div> : null}
 
       </div>
 

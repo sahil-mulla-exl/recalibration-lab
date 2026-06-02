@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { PERFORMANCE_SUBTABS } from "@/config/diagnostics";
 import {
   metricsAtThreshold,
   THRESHOLD_METRIC_ROWS,
@@ -24,10 +23,9 @@ import { RocChart } from "@/components/diagnostics/RocChart";
 import { ShapFlagCards } from "@/components/diagnostics/ShapFlagCards";
 import { ShapImportanceChart } from "@/components/diagnostics/ShapImportanceChart";
 import { ShapImportanceTable } from "@/components/diagnostics/ShapImportanceTable";
+import { DiagnosticsSectionHeading } from "@/components/diagnostics/DiagnosticsSectionHeading";
+import { PERFORMANCE_DRIFT_SECTIONS } from "@/config/diagnostics";
 import { perfBaselineLabel, perfCompareSubtitle, perfNewLabel } from "@/config/datasets";
-import { SubTabBar } from "@/components/diagnostics/SubTabBar";
-import { useSession } from "@/contexts/session";
-import { downloadDiagnosticsReportFile } from "@/services/api";
 
 type PerfDriftTabProps = {
   report: Record<string, unknown>;
@@ -97,11 +95,7 @@ function ConfusionMatrixCard({
 }
 
 export function PerfDriftTab({ report }: PerfDriftTabProps) {
-  const { sessionId } = useSession();
-  const [subtab, setSubtab] = useState<string>("discrimination");
-  const [downloadBusy, setDownloadBusy] = useState(false);
   const [thresholdMode, setThresholdMode] = useState<ThresholdMode>("current");
-  const [topK, setTopK] = useState<number>(10);
   const [pdpFeature, setPdpFeature] = useState<string>("");
   const perf = (report.performance_drift ?? {}) as Record<string, any>;
   const interp = (report.interpretability ?? {}) as Record<string, any>;
@@ -125,7 +119,7 @@ export function PerfDriftTab({ report }: PerfDriftTabProps) {
   const newClf = classificationAtThreshold.new;
   const shapDev = (interp.shap_importance_dev ?? {}) as Record<string, number>;
   const shapNew = (interp.shap_importance_new ?? {}) as Record<string, number>;
-  const shapRows = useMemo(() => {
+  const shapRowsAll = useMemo(() => {
     const keys = Array.from(new Set([...Object.keys(shapDev), ...Object.keys(shapNew)]));
     const sortedDev = [...keys].sort((a, b) => (Number(shapDev[b] ?? 0) - Number(shapDev[a] ?? 0)));
     const rankDev = Object.fromEntries(sortedDev.map((k, idx) => [k, idx + 1]));
@@ -139,9 +133,9 @@ export function PerfDriftTab({ report }: PerfDriftTabProps) {
         devImportance: Number(shapDev[feature] ?? 0),
         newImportance: Number(shapNew[feature] ?? 0),
       }))
-      .sort((a, b) => a.devRank - b.devRank)
-      .slice(0, topK);
-  }, [shapDev, shapNew, topK]);
+      .sort((a, b) => a.devRank - b.devRank);
+  }, [shapDev, shapNew]);
+  const shapRows = shapRowsAll.slice(0, 10);
   const pdpDev = (interp.pdp_dev ?? {}) as Record<string, { x: number[]; y: number[] }>;
   const pdpNew = (interp.pdp_new ?? {}) as Record<string, { x: number[]; y: number[] }>;
   const pdpFeatureOptions = useMemo(() => Array.from(new Set([...Object.keys(pdpDev), ...Object.keys(pdpNew)])), [pdpDev, pdpNew]);
@@ -185,94 +179,8 @@ export function PerfDriftTab({ report }: PerfDriftTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <SubTabBar value={subtab} onValueChange={setSubtab} items={PERFORMANCE_SUBTABS} />
-        <button
-          type="button"
-          className="h-8 rounded border px-3 text-xs bg-white dark:bg-slate-900 disabled:opacity-60"
-          disabled={!sessionId || downloadBusy}
-          onClick={async () => {
-            if (!sessionId) return;
-            try {
-              setDownloadBusy(true);
-              await downloadDiagnosticsReportFile(sessionId, "performance", report);
-            } finally {
-              setDownloadBusy(false);
-            }
-          }}
-        >
-          {downloadBusy ? "Downloading..." : "Download report"}
-        </button>
-      </div>
-
-      {subtab === "discrimination" && (
-        <div className="space-y-4">
-          <ChartCard
-            title="Score PSI"
-            subtitle={perfCompareSubtitle()}
-            conclusion={psiConclusion}
-            className="w-full md:w-1/2"
-          >
-            <div className="text-3xl font-semibold text-foreground">{scorePsi.toFixed(3)}</div>
-          </ChartCard>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
-            <ChartCard title="ROC Curve">
-            <RocChart
-              dev={(perf.roc_curve_dev ?? []) as Array<{ fpr: number; tpr: number }>}
-              current={(perf.roc_curve_new ?? []) as Array<{ fpr: number; tpr: number }>}
-            />
-            </ChartCard>
-            <ChartCard title="KS Curve">
-            <KsChart data={(perf.ks_curve_new ?? []) as Array<{ population_pct: number; cum_pos_pct: number; cum_neg_pct: number }>} />
-            </ChartCard>
-            <ChartCard title="Performance radar">
-            <RadarPerfChart
-              data={[
-                { metric: "AUC", dev: Number(perf.auc_dev ?? 0), current: Number(perf.auc_new ?? 0) },
-                { metric: "KS", dev: Number(perf.ks_dev ?? 0), current: Number(perf.ks_new ?? 0) },
-                { metric: "Gini", dev: Number(perf.gini_dev ?? 0), current: Number(perf.gini_new ?? 0) },
-                { metric: "AUC-PR", dev: Number(perf.auc_pr_dev ?? 0), current: Number(perf.auc_pr_new ?? 0) },
-              ]}
-            />
-            </ChartCard>
-            <ChartCard title="Calibration">
-            <CalibrationChart data={calibrationData} />
-            </ChartCard>
-          </div>
-        </div>
-      )}
-
-      {subtab === "rank" && (
-        <div className="space-y-4">
-          <ChartCard title="ROB monotonicity score" className="w-full md:w-1/2">
-            <div className="space-y-2 py-1 text-left">
-              <p className="text-lg font-semibold text-foreground">
-                {Number(perf.rob_dev?.non_decreasing_count ?? 0)} / {Number(perf.rob_dev?.total_transitions ?? 0)} ({perfBaselineLabel()})
-              </p>
-              <p className="text-lg font-semibold text-foreground">
-                {Number(perf.rob_new?.non_decreasing_count ?? 0)} / {Number(perf.rob_new?.total_transitions ?? 0)} ({perfNewLabel()})
-              </p>
-            </div>
-          </ChartCard>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
-            <ChartCard title="Decile event rates">
-            <DecileChart data={decileData} />
-            </ChartCard>
-            <ChartCard title="Cumulative gains">
-            <CumulativeGainsChart
-              data={((perf.new_lift_table ?? []) as Array<{ decile: number; cumulative_capture: number }>).map((row, idx) => ({
-                x: (idx + 1) * 10,
-                dev: Number(((perf.dev_lift_table ?? [])[idx] as any)?.cumulative_capture ?? 0) * 100,
-                current: Number(row.cumulative_capture ?? 0) * 100,
-              }))}
-            />
-            </ChartCard>
-          </div>
-        </div>
-      )}
-
-      {subtab === "classification" && (
-        <div className="space-y-4">
+      <div className="space-y-4">
+          <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[0].label} />
           <ChartCard title="Probability threshold">
             <div className="flex items-center gap-2 flex-wrap text-sm">
               <span>Threshold:</span>
@@ -348,25 +256,73 @@ export function PerfDriftTab({ report }: PerfDriftTabProps) {
               </TableBody>
             </Table>
           </ChartCard>
-        </div>
-      )}
+      </div>
 
-      {subtab === "interpretability" && (
-        <div className="space-y-4">
+      <div className="space-y-4">
+          <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[1].label} subtitle="ROC, KS, Gini, calibration, and score stability" />
+          <ChartCard title="Score PSI" subtitle={perfCompareSubtitle()} conclusion={psiConclusion} className="w-full md:w-1/2">
+            <div className="text-3xl font-semibold text-foreground">{scorePsi.toFixed(3)}</div>
+          </ChartCard>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
+            <ChartCard title="ROC Curve">
+            <RocChart
+              dev={(perf.roc_curve_dev ?? []) as Array<{ fpr: number; tpr: number }>}
+              current={(perf.roc_curve_new ?? []) as Array<{ fpr: number; tpr: number }>}
+            />
+            </ChartCard>
+            <ChartCard title="KS Curve">
+            <KsChart data={(perf.ks_curve_new ?? []) as Array<{ population_pct: number; cum_pos_pct: number; cum_neg_pct: number }>} />
+            </ChartCard>
+            <ChartCard title="Performance radar">
+            <RadarPerfChart
+              data={[
+                { metric: "AUC", dev: Number(perf.auc_dev ?? 0), current: Number(perf.auc_new ?? 0) },
+                { metric: "KS", dev: Number(perf.ks_dev ?? 0), current: Number(perf.ks_new ?? 0) },
+                { metric: "Gini", dev: Number(perf.gini_dev ?? 0), current: Number(perf.gini_new ?? 0) },
+                { metric: "AUC-PR", dev: Number(perf.auc_pr_dev ?? 0), current: Number(perf.auc_pr_new ?? 0) },
+              ]}
+            />
+            </ChartCard>
+            <ChartCard title="Calibration">
+            <CalibrationChart data={calibrationData} />
+            </ChartCard>
+          </div>
+
+          <ChartCard title="ROB monotonicity score" className="w-full md:w-1/2">
+            <div className="space-y-2 py-1 text-left">
+              <p className="text-lg font-semibold text-foreground">
+                {Number(perf.rob_dev?.non_decreasing_count ?? 0)} / {Number(perf.rob_dev?.total_transitions ?? 0)} ({perfBaselineLabel()})
+              </p>
+              <p className="text-lg font-semibold text-foreground">
+                {Number(perf.rob_new?.non_decreasing_count ?? 0)} / {Number(perf.rob_new?.total_transitions ?? 0)} ({perfNewLabel()})
+              </p>
+            </div>
+          </ChartCard>
+
+          <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[2].label} subtitle="Decile stability, lift, and rank-order checks" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
+            <ChartCard title="Decile event rates">
+            <DecileChart data={decileData} />
+            </ChartCard>
+            <ChartCard title="Cumulative gains">
+            <CumulativeGainsChart
+              data={((perf.new_lift_table ?? []) as Array<{ decile: number; cumulative_capture: number }>).map((row, idx) => ({
+                x: (idx + 1) * 10,
+                dev: Number(((perf.dev_lift_table ?? [])[idx] as any)?.cumulative_capture ?? 0) * 100,
+                current: Number(row.cumulative_capture ?? 0) * 100,
+              }))}
+            />
+            </ChartCard>
+          </div>
+
+          <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[3].label} subtitle="SHAP shift and partial dependence" />
           <ChartCard
             title="SHAP feature importance"
-            subtitle="Top-k display only; SHAP is computed for all features"
-            actions={(
-              <select className="h-8 rounded border px-2 bg-background text-xs" value={String(topK)} onChange={(e) => setTopK(Number(e.target.value))}>
-                <option value="10">Top 10</option>
-                <option value="20">Top 20</option>
-                <option value="50">Top 50</option>
-              </select>
-            )}
+            subtitle="Top 10 features by development validation rank — importance and rank shift vs new validation"
           >
           <ShapFlagCards flags={interp.shap_flags as Record<string, unknown>} />
             <div className="mt-3 space-y-4">
-              <ShapImportanceTable rows={shapRows} />
+              <ShapImportanceTable rows={shapRows} rankView="delta" />
               <ShapImportanceChart rows={shapRows} />
             </div>
           </ChartCard>
@@ -389,8 +345,7 @@ export function PerfDriftTab({ report }: PerfDriftTabProps) {
           >
             <PdpChart dev={pdpDevPoints} current={pdpNewPoints} chartType={pdpChartType} />
           </ChartCard>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

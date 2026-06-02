@@ -6,7 +6,7 @@ import {
   FileCode, Database, Box, AlertTriangle, ShieldCheck,
   Plug, X, Loader2, Trash2, Check, ChevronsUpDown,
 } from "lucide-react";
-import { loadSamples, removeIngestionFile, runAgent, uploadFile } from "@/services/api";
+import { configureIngestionVariables, loadSamples, removeIngestionFile, runAgent, uploadFile } from "@/services/api";
 import { useSession, usePersistedState } from "@/contexts/session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,6 +23,7 @@ interface SchemaCheck {
   dtype_mismatches?: { col: string; dev: string; new: string }[];
   target_in_dev?: boolean;
   target_in_new?: boolean;
+  outcome_excluded_from_schema?: string;
   error?: string;
 }
 
@@ -44,7 +45,7 @@ interface FileMeta {
   error?: string;
 }
 
-type Section = "data" | "model" | "code";
+type Section = "data" | "model" | "code" | "dictionary";
 
 interface FileKind {
   id: string;
@@ -53,6 +54,7 @@ interface FileKind {
   icon: ReactElement;
   desc: string;
   section: Section;
+  optional?: boolean;
 }
 
 function SearchableVariableSelect({
@@ -128,6 +130,15 @@ const FILE_KINDS: FileKind[] = [
   { id: "model", label: "Model Object", ext: ".pkl", icon: <Box className="h-4 w-4" />, desc: "Serialized model (.pkl)", section: "model" },
   { id: "preprocess", label: "Preprocessing", ext: ".py", icon: <FileCode className="h-4 w-4" />, desc: "preprocess.py", section: "code" },
   { id: "features", label: "Feature Engineering", ext: ".py", icon: <FileCode className="h-4 w-4" />, desc: "feature_engineering.py", section: "code" },
+  {
+    id: "data_dictionary",
+    label: "Data Dictionary",
+    ext: ".csv,.xlsx,.xls",
+    icon: <FileCode className="h-4 w-4" />,
+    desc: "Variable descriptions (.csv / .xlsx)",
+    section: "dictionary",
+    optional: true,
+  },
 ];
 
 function StatPill({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "warn" | "good" }) {
@@ -184,6 +195,11 @@ function SchemaCheckBadge({ check }: { check?: SchemaCheck }) {
       )}
       {check.target_in_dev !== check.target_in_new && (
         <p className="font-mono text-[11px]">Target column presence differs (dev: {String(check.target_in_dev)} · new: {String(check.target_in_new)})</p>
+      )}
+      {check.outcome_excluded_from_schema && (
+        <p className="font-mono text-[11px]">
+          Outcome column <span className="font-semibold">{check.outcome_excluded_from_schema}</span> is not required on this dataset
+        </p>
       )}
     </div>
   );
@@ -321,6 +337,7 @@ function FileRow({
   selectedTarget,
   selectedOutcome,
   problemType,
+  uploadDisabled = false,
 }: {
   kind: FileKind;
   meta: FileMeta | undefined;
@@ -329,6 +346,7 @@ function FileRow({
   selectedTarget?: string;
   selectedOutcome?: string;
   problemType: "classification" | "regression";
+  uploadDisabled?: boolean;
 }) {
   const loaded = !!meta;
   const isDatasetKind =
@@ -385,17 +403,18 @@ function FileRow({
               <Plug className="h-3.5 w-3.5" />Connect DB
             </Button>
           )}
-          <label className="cursor-pointer">
+          <label className={uploadDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}>
             <input
               type="file"
               className="hidden"
               accept={kind.ext}
+              disabled={uploadDisabled}
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) onUpload(kind.id, f);
+                if (f && !uploadDisabled) onUpload(kind.id, f);
               }}
             />
-            <Button size="sm" variant="ghost" asChild>
+            <Button size="sm" variant="ghost" asChild disabled={uploadDisabled}>
               <span className="gap-1.5"><Upload className="h-3.5 w-3.5" />{loaded ? "Replace" : "Upload"}</span>
             </Button>
           </label>
@@ -472,20 +491,6 @@ export default function Ingestion() {
     }
   };
 
-  const handleFileUpload = async (kind: string, file: File) => {
-    if (!sessionId) return;
-    const targetForUpload =
-      kind === "dev_data" || kind === "new_data" || kind === "hold_data" || kind === "new_data_oos"
-        ? (targetVariable || undefined)
-        : undefined;
-    const outcomeForUpload =
-      kind === "dev_data" || kind === "new_data" ? (outcomeVariable || undefined) : undefined;
-    const meta = await uploadFile(sessionId, file, kind, targetForUpload, outcomeForUpload);
-    // Functional update — guards against rapid uploads racing on stale state.
-    setLoadedFiles((prev) => ({ ...prev, [kind]: meta }));
-    setFilesLoaded(true);
-  };
-
   const handleClearAllFiles = async () => {
     if (!sessionId) return;
     setClearingAll(true);
@@ -495,6 +500,8 @@ export default function Ingestion() {
       );
       setLoadedFiles({});
       setFilesLoaded(false);
+      setTargetVariable("");
+      setOutcomeVariable("");
     } finally {
       setClearingAll(false);
     }
@@ -519,18 +526,41 @@ export default function Ingestion() {
     }
   };
 
-  const loadedCount = FILE_KINDS.filter((k) => !!loadedFiles[k.id]).length;
-  const allFilesLoaded = loadedCount === FILE_KINDS.length;
-  const datasetKinds = FILE_KINDS.filter((k) => k.section === "data");
+  const requiredKinds = FILE_KINDS.filter((k) => !k.optional);
+  const loadedCount = requiredKinds.filter((k) => !!loadedFiles[k.id]).length;
+  const allFilesLoaded = loadedCount === requiredKinds.length;
+  const devDataKind = FILE_KINDS.find((k) => k.id === "dev_data")!;
+  const otherDatasetKinds = FILE_KINDS.filter(
+    (k) => k.section === "data" && k.id !== "dev_data",
+  );
   const modelKinds = FILE_KINDS.filter((k) => k.section === "model");
   const codeKinds = FILE_KINDS.filter((k) => k.section === "code");
+  const dictionaryKinds = FILE_KINDS.filter((k) => k.section === "dictionary");
   const devColumns = loadedFiles.dev_data?.columns ?? [];
+  const devDataLoaded = !!loadedFiles.dev_data;
+  const variablesReady = Boolean(targetVariable && outcomeVariable);
 
   useEffect(() => {
     if (devColumns.length === 0) return;
     if (targetVariable && !devColumns.includes(targetVariable)) setTargetVariable("");
     if (outcomeVariable && !devColumns.includes(outcomeVariable)) setOutcomeVariable("");
   }, [devColumns, targetVariable, outcomeVariable, setTargetVariable, setOutcomeVariable]);
+
+  useEffect(() => {
+    if (!sessionId || !devDataLoaded || !targetVariable || !outcomeVariable) return;
+    const timer = window.setTimeout(() => {
+      void configureIngestionVariables(sessionId, targetVariable, outcomeVariable).then((res) => {
+        if (res.error) return;
+        if (res.refreshed) {
+          setLoadedFiles((prev) => ({
+            ...prev,
+            ...(res.refreshed as Record<string, FileMeta>),
+          }));
+        }
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, devDataLoaded, targetVariable, outcomeVariable]);
 
   // Block forward progress if new_data has a hard schema mismatch with dev_data
   const newDataCheck = loadedFiles.new_data?.schema_check;
@@ -542,6 +572,19 @@ export default function Ingestion() {
   const schemaMismatch = newSchemaMismatch || holdSchemaMismatch || oosSchemaMismatch;
   const hasMandatoryVariableSelection = Boolean(targetVariable && outcomeVariable);
   const variableSelectionMissing = !hasMandatoryVariableSelection;
+
+  const handleFileUpload = async (kind: string, file: File) => {
+    if (!sessionId) return;
+    if (kind !== "dev_data" && !variablesReady) return;
+    const targetForUpload = kind === "dev_data" ? undefined : targetVariable || undefined;
+    const meta = await uploadFile(sessionId, file, kind, targetForUpload, undefined);
+    setLoadedFiles((prev) => ({ ...prev, [kind]: meta }));
+    setFilesLoaded(true);
+    if (kind === "dev_data") {
+      setTargetVariable("");
+      setOutcomeVariable("");
+    }
+  };
 
   const launchIngestionAgent = () => {
     if (!sessionId || agentLaunchRef.current) return;
@@ -632,14 +675,14 @@ export default function Ingestion() {
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-muted-foreground uppercase tracking-wider font-medium">Required Artifacts</span>
                 <span className="font-mono text-foreground">
-                  <span className="text-emerald-400">{loadedCount}</span> / {FILE_KINDS.length} ready
+                  <span className="text-emerald-400">{loadedCount}</span> / {requiredKinds.length} required
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
                 <motion.div
                   className="h-full bg-emerald-500"
                   initial={false}
-                  animate={{ width: `${(loadedCount / FILE_KINDS.length) * 100}%` }}
+                  animate={{ width: `${(loadedCount / requiredKinds.length) * 100}%` }}
                   transition={{ duration: 0.4, ease: "easeOut" }}
                 />
               </div>
@@ -648,50 +691,74 @@ export default function Ingestion() {
 
           <Card className="p-5 space-y-3">
             <div>
-              <h2 className="font-semibold text-sm">Datasets</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Development Data, New Data, Development Validation Sample, and New Validation Sample — schema-checked on upload</p>
+              <h2 className="font-semibold text-sm">Development Data</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Upload Development Data first, then select target and outcome variables from its columns.
+              </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Target Variable</p>
-                <SearchableVariableSelect
-                  value={targetVariable}
-                  options={devColumns}
-                  placeholder="Select from Development Data columns"
-                  onChange={setTargetVariable}
-                  allowNone={false}
-                />
-                <p className="text-[10px] text-muted-foreground">Required. Auto-applied to New Data, Development Validation Sample, and New Validation Sample.</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Outcome Variable</p>
-                <SearchableVariableSelect
-                  value={outcomeVariable}
-                  options={devColumns}
-                  placeholder="Select from Development Data columns"
-                  onChange={setOutcomeVariable}
-                  allowNone={false}
-                />
+            <FileRow
+              kind={devDataKind}
+              meta={loadedFiles.dev_data}
+              onUpload={handleFileUpload}
+              onConnectDb={setDbModalKind}
+              selectedTarget={targetVariable}
+              selectedOutcome={outcomeVariable}
+              problemType={problemType}
+            />
+            {devDataLoaded && (
+              <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 space-y-3">
+                <p className="text-xs font-medium text-primary">Variable selection (required)</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Target variable</p>
+                    <SearchableVariableSelect
+                      value={targetVariable}
+                      options={devColumns}
+                      placeholder="Select from Development Data columns"
+                      onChange={setTargetVariable}
+                      allowNone={false}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Prediction columns</p>
+                    <SearchableVariableSelect
+                      value={outcomeVariable}
+                      options={devColumns}
+                      placeholder="Select from Development Data columns"
+                      onChange={setOutcomeVariable}
+                      allowNone={false}
+                    />
+                  </div>
+                </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Required for Development Data. If the same column exists in New Data, it is used as the observed outcome; otherwise a model-generated <span className="font-mono">predicted_outcome</span> column is created.
+                  Both variables are required on Development Data. The outcome column is excluded from schema checks on other datasets.
+                  Target is required on New Data, Development Validation Sample, and New Validation Sample.
                 </p>
               </div>
+            )}
+          </Card>
+
+          <Card className="p-5 space-y-3">
+            <div>
+              <h2 className="font-semibold text-sm">Additional Datasets</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {variablesReady
+                  ? "Upload remaining datasets — schema-checked against Development Data."
+                  : "Complete Development Data upload and variable selection to enable these uploads."}
+              </p>
             </div>
             <div className="space-y-2">
-              {datasetKinds.map((k) => (
+              {otherDatasetKinds.map((k) => (
                 <FileRow
                   key={k.id}
                   kind={k}
                   meta={loadedFiles[k.id]}
                   onUpload={handleFileUpload}
-                  onConnectDb={
-                    k.id === "dev_data" || k.id === "new_data" || k.id === "hold_data" || k.id === "new_data_oos"
-                      ? setDbModalKind
-                      : undefined
-                  }
+                  onConnectDb={setDbModalKind}
                   selectedTarget={targetVariable}
                   selectedOutcome={outcomeVariable}
                   problemType={problemType}
+                  uploadDisabled={!variablesReady}
                 />
               ))}
             </div>
@@ -735,6 +802,26 @@ export default function Ingestion() {
             </Card>
           </div>
 
+          <Card className="p-5 space-y-3">
+            <div>
+              <h2 className="font-semibold text-sm">Data Dictionary</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Optional — upload after code artifacts. CSV or Excel with column names, definitions, and types.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {dictionaryKinds.map((k) => (
+                <FileRow
+                  key={k.id}
+                  kind={k}
+                  meta={loadedFiles[k.id]}
+                  onUpload={handleFileUpload}
+                  problemType={problemType}
+                />
+              ))}
+            </div>
+          </Card>
+
           {/* Schema mismatch hard block */}
           {schemaMismatch && (
             <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3 text-xs text-orange-300 flex items-start gap-2">
@@ -752,11 +839,16 @@ export default function Ingestion() {
               </div>
             </div>
           )}
-          {allFilesLoaded && variableSelectionMissing && (
+          {!devDataLoaded && (
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+              Upload Development Data to unlock target and outcome variable selection.
+            </div>
+          )}
+          {devDataLoaded && variableSelectionMissing && (
             <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3 text-xs text-orange-300 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
               <div>
-                Target Variable and Outcome Variable selections are mandatory before running ingestion.
+                Select target variable and prediction columns from Development Data before uploading other datasets or proceeding.
               </div>
             </div>
           )}
@@ -767,7 +859,7 @@ export default function Ingestion() {
                 onClick={handleProceedToDataProcessing}
                 size="lg"
                 className="gap-2"
-                disabled={!!schemaMismatch || variableSelectionMissing}
+                disabled={!!schemaMismatch || variableSelectionMissing || !devDataLoaded}
               >
                 Proceed to Data Processing <ArrowRight className="h-4 w-4" />
               </Button>

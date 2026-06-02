@@ -638,6 +638,7 @@ class ReproducibilityAgent(Agent):
         from backend.app.utils.export_scores import (
             DEFAULT_REFERENCE_PREDICTIONS,
             build_score_comparison,
+            prepare_score_comparison_table,
         )
         reference_path = session.get("reference_predictions_path") or DEFAULT_REFERENCE_PREDICTIONS
         if os.path.exists(reference_path):
@@ -645,6 +646,7 @@ class ReproducibilityAgent(Agent):
                 comparison_df, comparison_summary = build_score_comparison(
                     processed_dev_path, reference_path
                 )
+                comparison_df = prepare_score_comparison_table(comparison_df)
                 comparison_path = score_comparison_path(self.session_id, "dev")
                 comparison_df.to_csv(comparison_path, index=False)
                 result["score_comparison_summary"] = comparison_summary

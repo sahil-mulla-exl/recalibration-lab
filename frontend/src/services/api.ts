@@ -89,6 +89,20 @@ export const removeIngestionFile = (session_id: string, kind: string) =>
     body: JSON.stringify({ session_id, kind }),
   });
 
+export const configureIngestionVariables = (
+  session_id: string,
+  target_variable: string,
+  outcome_variable: string,
+) =>
+  apiFetch<{
+    ok?: boolean;
+    error?: string;
+    refreshed?: Record<string, unknown>;
+  }>("/ingestion/configure-variables", {
+    method: "POST",
+    body: JSON.stringify({ session_id, target_variable, outcome_variable }),
+  });
+
 // ── Agents ─────────────────────────────────────────────────────────────────────
 export type AgentName = "ingestion" | "reproducibility" | "drift" | "recalibration" | "evaluation";
 
@@ -218,11 +232,15 @@ export const exportScoreComparison = (
   session_id: string,
   dataset: "dev" | "new" = "dev",
   reference_path?: string,
+  format: "csv" | "xlsx" = "csv",
 ) => {
-  const params = new URLSearchParams({ session_id, dataset });
+  const params = new URLSearchParams({ session_id, dataset, format });
   if (reference_path) params.set("reference_path", reference_path);
   return `${BASE}/export/score-comparison?${params.toString()}`;
 };
+
+export const exportProcessingWorkbook = (session_id: string, dataset: "dev" | "new" = "dev") =>
+  `${BASE}/export/processing-workbook?session_id=${session_id}&dataset=${dataset}`;
 
 export type ScoreComparisonData = {
   path?: string;

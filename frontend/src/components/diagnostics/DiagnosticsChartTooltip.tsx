@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { TooltipProps } from "recharts";
 
 import { CHART_DATAKEY_LABELS, chartDataKeyLabel } from "@/config/datasets";
+import { EVALUATION_CHART_LABELS } from "@/config/evaluation";
 
 import type { ChartTheme } from "@/lib/chartTheme";
 
@@ -42,9 +43,15 @@ function resolveSeriesLabel(entry: PayloadEntry): string {
 
   if (CHART_DATAKEY_LABELS[key]) return CHART_DATAKEY_LABELS[key];
 
+  if (EVALUATION_CHART_LABELS[key]) return EVALUATION_CHART_LABELS[key];
+
   if (EXTRA_LABEL_BY_KEY[key]) return EXTRA_LABEL_BY_KEY[key];
 
-  return chartDataKeyLabel(key, String(entry.name ?? "") || key || "Value");
+  const name = String(entry.name ?? "");
+
+  if (name && EVALUATION_CHART_LABELS[name]) return EVALUATION_CHART_LABELS[name];
+
+  return chartDataKeyLabel(key, name || key || "Value");
 
 }
 

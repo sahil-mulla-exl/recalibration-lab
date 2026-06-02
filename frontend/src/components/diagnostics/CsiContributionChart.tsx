@@ -1,39 +1,89 @@
+import { useMemo } from "react";
+
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ChartPlot } from "@/components/diagnostics/ChartPlot";
-import { axisLabel, axisTick, cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+
+import { ChartFrame } from "@/components/diagnostics/ChartFrame";
+
+import { chartYAxis } from "@/lib/chartAxes";
+
+import { categoryAxisLayout } from "@/lib/chartLayout";
+import {
+  axisLabel,
+  axisTick,
+  axisTickSpacing,
+  cartesianGrid,
+  categoryChartMargin,
+  chartTooltipProps,
+  useChartTheme,
+} from "@/lib/chartTheme";
+
+
 
 type Row = { feature: string; contribution: number };
+
 type CsiContributionChartProps = { rows: Row[] };
 
+
+
 export function CsiContributionChart({ rows }: CsiContributionChartProps) {
+
   const theme = useChartTheme();
+
   const fmt3 = (v: number | string) => Number(v).toFixed(3);
+
+  const featureLabels = useMemo(() => rows.map((r) => r.feature), [rows]);
+
+  const xLayout = useMemo(() => categoryAxisLayout(featureLabels), [featureLabels]);
+
+  const margin = useMemo(() => categoryChartMargin(xLayout.height), [xLayout.height]);
+
+
+
   return (
-    <ChartPlot className="h-64">
+
+    <ChartFrame theme={theme}>
+
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={chartMargin.labeledLeft}>
+
+        <BarChart data={rows} margin={margin}>
+
           <CartesianGrid {...cartesianGrid(theme, { vertical: false })} />
+
           <XAxis
+
             dataKey="feature"
-            tick={axisTick(theme)}
+
+            tick={{ ...axisTick(theme), dy: axisTickSpacing.x.dy }}
+
+            tickMargin={axisTickSpacing.x.tickMargin}
+
             stroke={theme.axisLine}
+
             interval={0}
-            angle={-25}
-            textAnchor="end"
-            height={50}
-            label={axisLabel(theme, "Feature", "insideBottom", { offset: -8 })}
+
+            angle={xLayout.angle}
+
+            textAnchor={xLayout.textAnchor}
+
+            height={xLayout.height}
+
+            label={axisLabel(theme, "Feature", "insideBottom")}
+
           />
-          <YAxis
-            tickFormatter={fmt3}
-            width={52}
-            tick={axisTick(theme)}
-            stroke={theme.axisLine}
-            label={axisLabel(theme, "CSI contribution", "insideLeft", { angle: -90, offset: 4 })}
-          />
+
+          <YAxis {...chartYAxis(theme, "CSI contribution", { tickFormatter: fmt3 })} />
+
           <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
-          <Bar dataKey="contribution" name="CSI contribution" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} />
+
+          <Bar dataKey="contribution" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} legendType="none" />
+
         </BarChart>
+
       </ResponsiveContainer>
-    </ChartPlot>
+
+    </ChartFrame>
+
   );
+
 }
+

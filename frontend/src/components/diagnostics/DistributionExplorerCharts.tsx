@@ -9,19 +9,19 @@ import {
   YAxis,
 } from "recharts";
 import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
-import { ChartPlot } from "@/components/diagnostics/ChartPlot";
-import { DiagnosticsChartLegend } from "@/components/diagnostics/DiagnosticsChartLegend";
-import { categoryAxisLayout } from "@/lib/chartLayout";
+import { ChartFrame } from "@/components/diagnostics/ChartFrame";
+import { chartYAxis } from "@/lib/chartAxes";
+import { CARD_CHART_HEIGHT, categoryAxisLayout } from "@/lib/chartLayout";
 import {
   axisLabel,
   axisTick,
+  axisTickSpacing,
   cartesianGrid,
+  categoryChartMargin,
   chartTooltipProps,
   useChartTheme,
 } from "@/lib/chartTheme";
 
-const Y_AXIS_WIDTH = 56;
-const PLOT_HEIGHT = 200;
 
 /** Distinct cohort colors (slate + orange) */
 function csiBarColors(isDark: boolean) {
@@ -94,15 +94,10 @@ export function DistributionExplorerCharts({
   );
   const xLayout = useMemo(() => categoryAxisLayout(binLabels), [binLabels]);
   const chartMargin = useMemo(
-    () => ({
-      top: 12,
-      right: 16,
-      left: Y_AXIS_WIDTH,
-      bottom: xLayout.marginBottom,
-    }),
-    [xLayout.marginBottom],
+    () => categoryChartMargin(xLayout.height, { left: 52 }),
+    [xLayout.height],
   );
-  const totalHeight = PLOT_HEIGHT + xLayout.height + 12;
+  const plotHeight = CARD_CHART_HEIGHT;
 
   const distributionLegendPayload = useMemo(
     () => [
@@ -127,7 +122,7 @@ export function DistributionExplorerCharts({
     angle: xLayout.angle,
     textAnchor: xLayout.textAnchor,
     height: xLayout.height,
-    tickMargin: 4,
+    tickMargin: axisTickSpacing.x.tickMargin,
   };
 
   if (distData.length === 0) {
@@ -139,24 +134,23 @@ export function DistributionExplorerCharts({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0 items-end">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0 items-stretch">
       {/* Distribution — cohort % */}
       <div className="min-w-0 flex flex-col">
-        <ChartPlot style={{ height: totalHeight }}>
+        <ChartFrame theme={theme} height={plotHeight} legend={distributionLegendPayload}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={distData} margin={chartMargin} barGap={4} barCategoryGap="18%">
               <CartesianGrid {...cartesianGrid(theme, { vertical: false })} />
               <XAxis
                 {...xAxisProps}
-                label={axisLabel(theme, "Value bin", "insideBottom", { offset: -6 })}
+                label={axisLabel(theme, "Value bin", "insideBottom")}
               />
               <YAxis
-                domain={[0, Math.ceil(distMax / 5) * 5]}
-                tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
-                width={Y_AXIS_WIDTH}
-                tick={axisTick(theme)}
-                stroke={theme.axisLine}
-                label={axisLabel(theme, "Cohort share (%)", "insideLeft", { angle: -90, offset: 4 })}
+                {...chartYAxis(theme, "Cohort share (%)", {
+                  domain: [0, Math.ceil(distMax / 5) * 5],
+                  tickFormatter: (v) => `${Number(v).toFixed(0)}%`,
+                  width: 48,
+                })}
               />
               <Tooltip
                 formatter={(value: number) => [`${Number(value).toFixed(2)}%`, ""]}
@@ -164,47 +158,40 @@ export function DistributionExplorerCharts({
               />
               <Bar
                 dataKey="trainPct"
-                name={`${driftBaselineLabel()} %`}
                 fill={theme.series.trainFill}
                 stroke={theme.series.train}
                 strokeWidth={1}
                 radius={[2, 2, 0, 0]}
+                legendType="none"
               />
               <Bar
                 dataKey="newPct"
-                name={`${INGESTION_DATASETS.new_data.label} %`}
                 fill={theme.series.newFill}
                 stroke={theme.series.new}
                 strokeWidth={1}
                 radius={[2, 2, 0, 0]}
+                legendType="none"
               />
             </BarChart>
           </ResponsiveContainer>
-        </ChartPlot>
-        <DiagnosticsChartLegend
-          payload={distributionLegendPayload}
-          theme={theme}
-          align="center"
-        />
+        </ChartFrame>
       </div>
 
-      {/* CSI contribution — separate color scale */}
       <div className="min-w-0 flex flex-col">
-        <ChartPlot style={{ height: totalHeight }}>
+        <ChartFrame theme={theme} height={plotHeight} legend={csiLegendPayload}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={contribData} margin={chartMargin} barCategoryGap="18%">
               <CartesianGrid {...cartesianGrid(theme, { vertical: false })} />
               <XAxis
                 {...xAxisProps}
-                label={axisLabel(theme, "Value bin", "insideBottom", { offset: -6 })}
+                label={axisLabel(theme, "Value bin", "insideBottom")}
               />
               <YAxis
-                domain={[0, contribMax * 1.12]}
-                tickFormatter={formatContrib}
-                width={Y_AXIS_WIDTH}
-                tick={axisTick(theme)}
-                stroke={theme.axisLine}
-                label={axisLabel(theme, "CSI contribution", "insideLeft", { angle: -90, offset: 4 })}
+                {...chartYAxis(theme, "CSI contribution", {
+                  domain: [0, contribMax * 1.12],
+                  tickFormatter: formatContrib,
+                  width: 48,
+                })}
               />
               <Tooltip
                 formatter={(value: number) => [formatContrib(value), "CSI contribution"]}
@@ -212,16 +199,15 @@ export function DistributionExplorerCharts({
               />
               <Bar
                 dataKey="contribution"
-                name="CSI contribution"
                 fill={csiColors.fill}
                 stroke={csiColors.stroke}
                 strokeWidth={1}
                 radius={[2, 2, 0, 0]}
+                legendType="none"
               />
             </BarChart>
           </ResponsiveContainer>
-        </ChartPlot>
-        <DiagnosticsChartLegend payload={csiLegendPayload} theme={theme} align="center" />
+        </ChartFrame>
       </div>
     </div>
   );

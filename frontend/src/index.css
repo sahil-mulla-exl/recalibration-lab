@@ -237,7 +237,7 @@ html.dark {
   color-scheme: dark;
 }
 
-/* Diagnostics chart cards — theme-safe text & borders */
+/* Diagnostics chart cards - theme-safe text & borders */
 :not(.dark) .chart-card,
 :not(.dark) [data-chart-card] {
   border-color: #94a3b8 !important;
@@ -266,13 +266,24 @@ html.dark {
   color: hsl(210, 40%, 96%) !important;
 }
 
-/* Recharts axis — diagnostics charts (light + dark) */
+/* Recharts axis - diagnostics charts (light + dark) */
+.chart-frame {
+  width: 100%;
+  min-width: 0;
+}
+.chart-frame .recharts-surface {
+  overflow: visible;
+}
 .diagnostics-chart .recharts-cartesian-axis-tick text,
 .diagnostics-chart .recharts-polar-angle-axis-tick text,
 .diagnostics-chart .recharts-polar-radius-axis-tick text {
   font-size: 11px;
 }
 
+:not(.dark) .chart-frame .recharts-cartesian-axis-tick text,
+:not(.dark) .chart-frame .recharts-polar-angle-axis-tick text,
+:not(.dark) .chart-frame .recharts-polar-radius-axis-tick text,
+:not(.dark) .chart-frame .recharts-label,
 :not(.dark) .diagnostics-chart .recharts-cartesian-axis-tick text,
 :not(.dark) .diagnostics-chart .recharts-polar-angle-axis-tick text,
 :not(.dark) .diagnostics-chart .recharts-polar-radius-axis-tick text,
@@ -292,6 +303,10 @@ html.dark {
   stroke: #94a3b8 !important;
 }
 
+.dark .chart-frame .recharts-cartesian-axis-tick text,
+.dark .chart-frame .recharts-polar-angle-axis-tick text,
+.dark .chart-frame .recharts-polar-radius-axis-tick text,
+.dark .chart-frame .recharts-label,
 .dark .diagnostics-chart .recharts-cartesian-axis-tick text,
 .dark .diagnostics-chart .recharts-polar-angle-axis-tick text,
 .dark .diagnostics-chart .recharts-polar-radius-axis-tick text,

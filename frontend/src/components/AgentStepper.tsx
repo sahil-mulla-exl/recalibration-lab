@@ -51,7 +51,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "evaluate_threshold", name: "Evaluate reproducibility threshold", status: "pending" },
   ],
   drift: [
-    { id: "load_context", name: "Load datasets, model and governance", status: "pending" },
+    { id: "load_context", name: "Load datasets, model", status: "pending" },
     { id: "compute_data_drift", name: "Compute data drift diagnostics", status: "pending" },
     { id: "compute_concept_drift", name: "Compute concept drift diagnostics", status: "pending" },
     { id: "compute_performance_drift", name: "Compute performance drift diagnostics", status: "pending" },
@@ -60,7 +60,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
   ],
   recalibration: [
     { id: "apply_variable_drops", name: "Apply variable drops", status: "pending" },
-    { id: "prepare_training_data", name: "Prepare train and OOT feature matrices", status: "pending" },
+    { id: "prepare_training_data", name: "Prepare train and Hold-out feature matrices", status: "pending" },
     { id: "setup_hp_search", name: "Set up hyperparameter search", status: "pending" },
     { id: "run_hp_tuning", name: "Run hyperparameter tuning (30 trials)", status: "pending" },
     { id: "train_final_model", name: "Train final model on best hyperparameters", status: "pending" },

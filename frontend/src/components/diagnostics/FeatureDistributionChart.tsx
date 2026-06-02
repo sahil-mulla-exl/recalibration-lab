@@ -1,39 +1,41 @@
-import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ChartPlot } from "@/components/diagnostics/ChartPlot";
-import { axisLabel, axisTick, cartesianGrid, chartLegendProps, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
-
-type Row = { bin: string; trainPct: number; newPct: number };
-type FeatureDistributionChartProps = { rows: Row[] };
-
-export function FeatureDistributionChart({ rows }: FeatureDistributionChartProps) {
-  const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
-  return (
-    <ChartPlot className="h-64">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={chartMargin.labeledLeft}>
-          <CartesianGrid {...cartesianGrid(theme, { vertical: false })} />
-          <XAxis
-            dataKey="bin"
-            tick={axisTick(theme)}
-            stroke={theme.axisLine}
-            interval={0}
-            label={axisLabel(theme, "Value bin", "insideBottom", { offset: -4 })}
-          />
-          <YAxis
-            tickFormatter={(v) => `${fmt3(v)}%`}
-            width={52}
-            tick={axisTick(theme)}
-            stroke={theme.axisLine}
-            label={axisLabel(theme, "Cohort share (%)", "insideLeft", { angle: -90, offset: 4 })}
-          />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
-          <Legend {...chartLegendProps(theme)} />
-          <Bar dataKey="trainPct" name={`${driftBaselineLabel()} %`} fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={1} />
-          <Bar dataKey="newPct" name={`${INGESTION_DATASETS.new_data.label} %`} fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} />
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartPlot>
-  );
-}
+import { useMemo } from "react";
+import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartFrame } from "@/components/diagnostics/ChartFrame";
+import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
+import { cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+
+type Row = { bin: string; trainPct: number; newPct: number };
+type FeatureDistributionChartProps = { rows: Row[] };
+
+export function FeatureDistributionChart({ rows }: FeatureDistributionChartProps) {
+  const theme = useChartTheme();
+  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+
+  const legend = useMemo(
+    () => [
+      { value: `${driftBaselineLabel()} %`, type: "square" as const, color: theme.series.train, dataKey: "trainPct" },
+      { value: `${INGESTION_DATASETS.new_data.label} %`, type: "square" as const, color: theme.series.new, dataKey: "newPct" },
+    ],
+    [theme.series.train, theme.series.new],
+  );
+
+  return (
+    <ChartFrame theme={theme} legend={legend}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} margin={chartMargin.xyTitles}>
+          <CartesianGrid {...cartesianGrid(theme, { vertical: false })} />
+          <XAxis {...chartXAxis(theme, "Value bin", { dataKey: "bin", interval: 0 })} />
+          <YAxis
+            {...chartYAxis(theme, "Cohort share (%)", {
+              tickFormatter: (v) => `${fmt3(v)}%`,
+            })}
+          />
+          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Bar dataKey="trainPct" fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={1} legendType="none" />
+          <Bar dataKey="newPct" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} legendType="none" />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  );
+}
