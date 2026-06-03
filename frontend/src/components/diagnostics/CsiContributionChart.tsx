@@ -75,7 +75,7 @@ export function CsiContributionChart({ rows }: CsiContributionChartProps) {
 
           <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
 
-          <Bar dataKey="contribution" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} legendType="none" />
+          <Bar dataKey="contribution" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
 
         </BarChart>
 

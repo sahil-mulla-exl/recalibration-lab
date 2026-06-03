@@ -6,15 +6,22 @@ import { DistributionExplorerCharts } from "@/components/diagnostics/Distributio
 import { MissingRateTable } from "@/components/diagnostics/MissingRateTable";
 import { useSession } from "@/contexts/session";
 import { downloadDiagnosticsReportFile } from "@/services/api";
-import { DescriptiveStatsTable } from "@/components/diagnostics/DescriptiveStatsTable";
+import { DescriptiveStatsCard } from "@/components/data-processing/DescriptiveStatsCard";
 import { TargetEventRateChart } from "@/components/diagnostics/TargetEventRateChart";
 import { driftBaselineLabel, driftCompareSubtitle } from "@/config/datasets";
+import { hasInventoryMetric, INVENTORY_DATA_DRIFT } from "@/config/inventoryMetrics";
+import { Card } from "@/components/ui/card";
 
 type DataDriftTabProps = {
   report: Record<string, unknown>;
+  selectedMetrics?: string[];
 };
 
-export function DataDriftTab({ report }: DataDriftTabProps) {
+export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps) {
+  const showCsi = hasInventoryMetric(selectedMetrics, "CSI");
+  const showPsi = hasInventoryMetric(selectedMetrics, "PSI");
+  const showTarget = hasInventoryMetric(selectedMetrics, "Target Shift");
+  const hasDataDriftConfig = INVENTORY_DATA_DRIFT.some((m) => hasInventoryMetric(selectedMetrics, m));
   const { sessionId } = useSession();
   const [csiTopN, setCsiTopN] = useState<number>(15);
   const [selectedDistFeature, setSelectedDistFeature] = useState<string>("");
@@ -168,8 +175,21 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
     stable: cardinalityRows.filter(([, vals]) => (vals.new_only ?? []).length === 0 && (vals.lost ?? []).length === 0).length,
   };
 
+  if (!hasDataDriftConfig && !showTarget) {
+    return (
+      <Card className="p-4 border-orange-300 bg-orange-50 dark:border-orange-500/30 dark:bg-orange-500/5">
+        <p className="text-xs text-orange-800 dark:text-orange-300">
+          No data drift metrics are selected in Inventory (PSI, CSI, IV, WOE). Select metrics on the Inventory page and
+          rerun diagnostics.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {hasDataDriftConfig && (
+      <>
       <ChartCard
           title="Descriptive statistics"
           subtitle={`${driftCompareSubtitle()}, with raw/processed toggle`}
@@ -210,7 +230,7 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
             </div>
           )}
         >
-          <DescriptiveStatsTable rows={rawRows} />
+          <DescriptiveStatsCard rows={rawRows} />
         </ChartCard>
 
         <div className="space-y-3">
@@ -246,7 +266,10 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
             <MissingRateTable rows={missingRows} />
           </ChartCard>
         </div>
+      </>
+      )}
 
+          {showTarget && (
           <ChartCard
             title="Target Drift"
             subtitle={`Event rate comparison — ${driftCompareSubtitle()}`}
@@ -286,7 +309,9 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
               />
             </div>
           </ChartCard>
+          )}
 
+          {showCsi && (
           <ChartCard
             title="Feature Drift (CSI)"
             subtitle="CSI ranked by model features with governance severity"
@@ -308,6 +333,9 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
           >
             <CsiRankedChart rows={csiRows.slice(0, csiTopN === 9999 ? csiRows.length : csiTopN)} />
           </ChartCard>
+          )}
+
+          {(showPsi || showCsi) && (
           <ChartCard
             title="Distribution"
             subtitle={`${driftCompareSubtitle()} distribution and CSI contribution`}
@@ -330,6 +358,7 @@ export function DataDriftTab({ report }: DataDriftTabProps) {
               contributionRows={contributionRows}
             />
           </ChartCard>
+          )}
     </div>
   );
 }

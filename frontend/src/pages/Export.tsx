@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
   Download, ArrowLeft, FileJson, Box, FileText, CheckCircle,
-  Database, BarChart2, Cpu, GitCompare, Archive, Sparkles, ShieldAlert, ShieldCheck, AlertTriangle,
+  ShieldAlert, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import { exportModel, exportLog, exportReport } from "@/services/api";
 import { recalibrationDecisionLabel } from "@/config/diagnostics";
@@ -11,42 +11,6 @@ import { SHOW_POLICY_GUARDRAILS } from "@/config/uiVisibility";
 import { usePersistedState, useSession, clearAllSessionState } from "@/contexts/session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-
-// ── Journey timeline ────────────────────────────────────────────────────────
-const JOURNEY_STEPS = [
-  { icon: <Database className="h-3.5 w-3.5" />, label: "Ingestion", desc: "Files loaded & validated" },
-  { icon: <BarChart2 className="h-3.5 w-3.5" />, label: "Drift Diagnostics", desc: "PSI · CSI · AUC degradation" },
-  { icon: <Cpu className="h-3.5 w-3.5" />, label: "Recalibration", desc: "HP tuning + final fit" },
-  { icon: <GitCompare className="h-3.5 w-3.5" />, label: "Evaluation", desc: "Champion vs recalibrated" },
-  { icon: <Archive className="h-3.5 w-3.5" />, label: "Export", desc: "Artifacts packaged" },
-];
-
-function JourneyTimeline() {
-  return (
-    <div className="relative flex items-start gap-0 min-w-[640px]">
-      {/* Connecting line */}
-      <div className="absolute top-4 left-4 right-4 h-px bg-emerald-500/20" style={{ zIndex: 0 }} />
-      {JOURNEY_STEPS.map((step, i) => (
-        <motion.div
-          key={step.label}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.08 }}
-          className="relative flex-1 flex flex-col items-center gap-2 text-center"
-          style={{ zIndex: 1 }}
-        >
-          <div className="h-8 w-8 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            {step.icon}
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-emerald-400">{step.label}</p>
-            <p className="text-[9px] text-muted-foreground leading-tight mt-0.5 max-w-[80px] mx-auto">{step.desc}</p>
-          </div>
-        </motion.div>
-      ))}
-    </div>
-  );
-}
 
 // ── Model passport ──────────────────────────────────────────────────────────
 function ModelPassport({
@@ -196,30 +160,6 @@ export default function ExportPage() {
         <h1 className="text-2xl font-bold">Export</h1>
         </div>
 
-      {/* Completion banner */}
-      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
-        <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-transparent overflow-hidden">
-          <div className="flex items-center gap-4 p-5">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
-              <Sparkles className="h-6 w-6 text-emerald-400" />
-            </div>
-            <div className="flex-1">
-              <p className="text-base font-bold text-emerald-400">Recalibration Complete</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {model.model_name || "Model"} · Session <span className="font-mono">{sessionId?.slice(0, 8)}</span> ·{" "}
-                {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              </p>
-            </div>
-            {!!evaluation.new_auc && (
-              <div className="text-right shrink-0">
-                <p className="text-xs text-muted-foreground">Recalibrated AUC</p>
-                <p className="text-2xl font-black font-mono text-emerald-400">{Number(evaluation.new_auc).toFixed(4)}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
-
       {SHOW_POLICY_GUARDRAILS && guardrails && (
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
           <Card className="p-4">
@@ -250,38 +190,6 @@ export default function ExportPage() {
                 ))}
               </ul>
             )}
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Journey timeline */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-        <Card className="p-5">
-          <h3 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-4">Workflow Completed</h3>
-          <div className="overflow-x-auto">
-            <JourneyTimeline />
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Key performance stats */}
-      {!!evaluation.new_auc && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-          <Card className="p-5">
-            <h3 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-4">Performance Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { label: "New AUC", value: Number(evaluation.new_auc).toFixed(4), good: true },
-                { label: "AUC Δ", value: `${Number(evaluation.auc_delta_pp || 0) > 0 ? "+" : ""}${Number(evaluation.auc_delta_pp || ((evaluation.new_auc as number) - (evaluation.orig_auc as number)) * 100).toFixed(2)} pp`, good: Number(evaluation.auc_delta_pp || 0) > 0 },
-                { label: "New Gini", value: Number(evaluation.new_gini).toFixed(4), good: true },
-                { label: "PSI", value: Number(drift.overall_psi || 0).toFixed(3), good: Number(drift.overall_psi || 0) < 0.25 },
-              ].map((stat) => (
-                <div key={stat.label} className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{stat.label}</p>
-                  <p className={`text-lg font-bold font-mono mt-1 ${stat.good ? "" : "text-orange-400"}`}>{stat.value}</p>
-                </div>
-              ))}
-            </div>
           </Card>
         </motion.div>
       )}

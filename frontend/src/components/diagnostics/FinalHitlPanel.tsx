@@ -99,9 +99,9 @@ export function FinalHitlPanel({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
 
-        {DIAGNOSTIC_FINAL_ACTIONS.map((item) => (
+        {DIAGNOSTIC_FINAL_ACTIONS.filter((item) => allowedActions.includes(item.id)).map((item) => (
 
           <button
 

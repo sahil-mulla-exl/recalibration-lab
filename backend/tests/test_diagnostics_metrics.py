@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from backend.app.utils.diagnostics_metrics import (
     compute_aucpr_logloss_brier,
@@ -12,8 +13,11 @@ from backend.app.utils.diagnostics_metrics import (
     compute_rank_order_analysis,
     compute_rob_monotonicity,
     compute_score_psi_frozen_deciles,
+    compute_univariate_gini,
+    compute_univariate_gini_comparison,
     find_optimal_thresholds,
 )
+from sklearn.metrics import roc_auc_score
 
 
 def test_compute_csi_with_frozen_bins_returns_expected_shape() -> None:
@@ -70,6 +74,40 @@ def test_rank_order_analysis_returns_decile_table() -> None:
     assert out["deciles"][0]["decile"] == 1
     assert "event_rate" in out["deciles"][0]
     assert "rank_order_break" in out
+
+
+def test_compute_univariate_gini_uses_raw_scores() -> None:
+    rng = np.random.default_rng(7)
+    n = 200
+    x = rng.normal(size=n)
+    prob = 1 / (1 + np.exp(-(x - x.mean()) / x.std()))
+    y = (rng.random(n) < prob).astype(int)
+    df = pd.DataFrame({"feat": x, "target": y})
+    out = compute_univariate_gini(df, "feat", "target", min_events=10)
+    assert out["insufficient_events"] is False
+    assert out["gini"] is not None
+    expected_auc = float(roc_auc_score(y, x))
+    assert out["auc"] == pytest.approx(expected_auc, rel=1e-6)
+    assert out["gini"] == pytest.approx(2 * expected_auc - 1, rel=1e-6)
+
+
+def test_compute_univariate_gini_drops_nan_and_respects_min_events() -> None:
+    df = pd.DataFrame({"feat": [1.0, 2.0, None, 4.0], "target": [0, 1, 0, 1]})
+    out = compute_univariate_gini(df, "feat", "target", min_events=50)
+    assert out["insufficient_events"] is True
+    assert out["gini"] is None
+
+
+def test_compute_univariate_gini_comparison_returns_delta() -> None:
+    dev = pd.DataFrame({"feat": np.linspace(0, 1, 120), "target": [0, 1] * 60})
+    new = pd.DataFrame({"feat": np.linspace(0, 1, 120), "target": [0, 1] * 60})
+    out = compute_univariate_gini_comparison(
+        dev, new, ["feat"], "target", "target", min_events=10
+    )
+    row = out["feat"]
+    assert row["dev_gini"] is not None
+    assert row["new_gini"] is not None
+    assert row["delta"] == pytest.approx(float(row["new_gini"]) - float(row["dev_gini"]))
 
 
 def test_classification_metrics_and_thresholds() -> None:

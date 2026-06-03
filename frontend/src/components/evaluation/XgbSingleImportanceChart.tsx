@@ -1,27 +1,32 @@
 import { useMemo } from "react";
-import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
 import { cartesianGrid, chartTooltipProps, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
 
-type Row = { feature: string; ivTrain: number; ivNew: number };
-type IvStrengthChartProps = { rows: Row[] };
+export type XgbImportanceBarRow = {
+  feature: string;
+  importance: number;
+};
 
-export function IvStrengthChart({ rows }: IvStrengthChartProps) {
+type XgbSingleImportanceChartProps = {
+  rows: XgbImportanceBarRow[];
+  color: string;
+  fill: string;
+  title: string;
+};
+
+export function XgbSingleImportanceChart({ rows, color, fill, title }: XgbSingleImportanceChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt4 = (v: number | string) => Number(v).toFixed(4);
   const labels = rows.map((r) => r.feature);
   const yWidth = featureLabelWidth(labels);
   const height = chartHeightForFeatureRows(rows.length);
 
   const legend = useMemo(
-    () => [
-      { value: driftBaselineLabel(), type: "square" as const, color: theme.series.train, dataKey: "ivTrain" },
-      { value: INGESTION_DATASETS.new_data.label, type: "square" as const, color: theme.series.new, dataKey: "ivNew" },
-    ],
-    [theme.series.train, theme.series.new],
+    () => [{ value: title, type: "square" as const, color, dataKey: "importance" }],
+    [color, title],
   );
 
   return (
@@ -29,7 +34,7 @@ export function IvStrengthChart({ rows }: IvStrengthChartProps) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} layout="vertical" margin={horizontalBarMargin(yWidth, 4)}>
           <CartesianGrid {...cartesianGrid(theme, { horizontal: false })} />
-          <XAxis {...chartXAxis(theme, "Information value (IV)", { type: "number", tickFormatter: fmt3 })} />
+          <XAxis {...chartXAxis(theme, "Importance", { type: "number", tickFormatter: fmt4 })} />
           <YAxis
             {...chartYAxis(theme, undefined, {
               type: "category",
@@ -38,9 +43,14 @@ export function IvStrengthChart({ rows }: IvStrengthChartProps) {
               interval: 0,
             })}
           />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
-          <Bar dataKey="ivTrain" fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
-          <Bar dataKey="ivNew" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
+          <Tooltip formatter={(value) => fmt4(value as number)} {...chartTooltipProps(theme)} />
+          <Bar
+            dataKey="importance"
+            fill={fill}
+            stroke={color}
+            strokeWidth={theme.plot.barStrokeWidth}
+            legendType="none"
+          />
         </BarChart>
       </ResponsiveContainer>
     </ChartFrame>

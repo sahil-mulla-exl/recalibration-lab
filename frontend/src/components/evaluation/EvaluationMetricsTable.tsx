@@ -72,7 +72,7 @@ export function EvaluationMetricsTable({ rows }: EvaluationMetricsTableProps) {
 
             <TableHead className="text-right">{EVALUATION_SERIES.recalibratedOos}</TableHead>
 
-            <TableHead className="text-right">Δ (Recal − Production)</TableHead>
+            <TableHead className="text-right">Δ (New - Dev)</TableHead>
 
           </TableRow>
 
@@ -105,16 +105,16 @@ export function EvaluationMetricsTable({ rows }: EvaluationMetricsTableProps) {
                 <TableCell
 
                   className={`text-right font-mono text-sm ${
-
-                    improved ? "text-emerald-600 dark:text-emerald-400" : "text-orange-700 dark:text-orange-400"
-
+                    Number.isFinite(delta)
+                      ? improved
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-orange-700 dark:text-orange-400"
+                      : ""
                   }`}
 
                 >
 
-                  {delta >= 0 ? "+" : ""}
-
-                  {fmt(delta)}
+                  {Number.isFinite(delta) ? `${delta >= 0 ? "+" : ""}${fmt(delta)}` : "—"}
 
                 </TableCell>
 

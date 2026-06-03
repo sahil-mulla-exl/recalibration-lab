@@ -80,6 +80,24 @@ export function perfNewLabel(): string {
   return INGESTION_DATASETS.new_data_oos.label;
 }
 
+/** Display label without trailing " Sample" (tables / compact headers). */
+export function stripSampleLabel(label: string): string {
+  return label.replace(/\s+Sample$/i, "");
+}
+
+export function perfBaselineShortLabel(): string {
+  return stripSampleLabel(perfBaselineLabel());
+}
+
+export function perfNewShortLabel(): string {
+  return stripSampleLabel(perfNewLabel());
+}
+
+/** Short delta column header for performance comparison tables. */
+export function perfDeltaShortLabel(): string {
+  return "Δ (New - Dev)";
+}
+
 export const CHART_DATAKEY_LABELS: Record<string, string> = {
   trainPct: `${INGESTION_DATASETS.dev_data.label} %`,
   newPct: `${INGESTION_DATASETS.new_data.label} %`,

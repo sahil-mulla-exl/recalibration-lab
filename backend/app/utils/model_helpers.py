@@ -285,6 +285,113 @@ def get_feature_importance(model: Any, feature_cols: list) -> Dict[str, float]:
     return {}
 
 
+def get_xgboost_native_importance(
+    model_obj: Any,
+    feature_cols: list[str] | None,
+    importance_type: str,
+) -> Dict[str, float]:
+    """
+    Extract native XGBoost feature importance by type (gain/weight/cover).
+
+    Returns a dense mapping for all known model features, filling missing
+    features with 0.0 when the booster omits them from get_score().
+    """
+    model = resolve_estimator(model_obj)
+    if not hasattr(model, "get_booster"):
+        return {}
+
+    try:
+        booster = model.get_booster()
+        raw_scores = booster.get_score(importance_type=importance_type) or {}
+    except Exception:
+        return {}
+
+    booster_names = [str(c) for c in (getattr(booster, "feature_names", None) or [])]
+    model_names: list[str] = []
+    if hasattr(model, "feature_names_in_"):
+        try:
+            model_names = [str(c) for c in list(model.feature_names_in_)]
+        except Exception:
+            model_names = []
+    fallback_names = [str(c) for c in (feature_cols or [])]
+
+    def _name_for_index(idx: int) -> str:
+        if idx < len(booster_names) and booster_names[idx]:
+            return booster_names[idx]
+        if idx < len(model_names) and model_names[idx]:
+            return model_names[idx]
+        if idx < len(fallback_names) and fallback_names[idx]:
+            return fallback_names[idx]
+        return f"f{idx}"
+
+    out: Dict[str, float] = {}
+    for raw_key, raw_value in raw_scores.items():
+        key = str(raw_key)
+        feature_name = key
+        match = re.fullmatch(r"f(\d+)", key)
+        if match:
+            feature_name = _name_for_index(int(match.group(1)))
+        try:
+            out[str(feature_name)] = float(raw_value)
+        except Exception:
+            continue
+
+    ordered_features: list[str] = []
+    for name in [*booster_names, *model_names, *fallback_names]:
+        if name and name not in ordered_features:
+            ordered_features.append(name)
+    for name in ordered_features:
+        out.setdefault(name, 0.0)
+
+    return out
+
+
+def build_xgboost_importance_comparison(
+    orig_imp: Dict[str, float],
+    new_imp: Dict[str, float],
+    features: list[str] | None,
+) -> list[Dict[str, Any]]:
+    """Build per-feature rank comparison rows across champion/recalibrated models."""
+    feature_list: list[str] = []
+    for feat in [*(features or []), *orig_imp.keys(), *new_imp.keys()]:
+        f = str(feat)
+        if f and f not in feature_list:
+            feature_list.append(f)
+
+    def _rank_map(values: Dict[str, float]) -> Dict[str, int]:
+        ordered = sorted(
+            feature_list,
+            key=lambda name: (-float(values.get(name, 0.0)), name),
+        )
+        return {name: idx + 1 for idx, name in enumerate(ordered)}
+
+    champion_rank = _rank_map(orig_imp)
+    recal_rank = _rank_map(new_imp)
+
+    rows: list[Dict[str, Any]] = []
+    for feat in feature_list:
+        champ_val = float(orig_imp.get(feat, 0.0))
+        recal_val = float(new_imp.get(feat, 0.0))
+        row = {
+            "feature": feat,
+            "champion_importance": champ_val,
+            "recal_importance": recal_val,
+            "champion_rank": champion_rank.get(feat, len(feature_list)),
+            "recal_rank": recal_rank.get(feat, len(feature_list)),
+        }
+        row["rank_delta"] = int(row["champion_rank"]) - int(row["recal_rank"])
+        rows.append(row)
+
+    rows.sort(
+        key=lambda r: (
+            int(r["recal_rank"]),
+            int(r["champion_rank"]),
+            str(r["feature"]),
+        ),
+    )
+    return rows
+
+
 def train_xgboost(X_train: pd.DataFrame, y_train: pd.Series, params: Dict) -> Any:
     from xgboost import XGBClassifier
     n_jobs = int(params.get("n_jobs", 1))

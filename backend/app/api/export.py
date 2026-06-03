@@ -1,7 +1,9 @@
 import os
 import json
+from datetime import datetime, timezone
+
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import FileResponse, Response
 from backend.app.utils.session import get_session, session_dir, update_session
 from backend.app.utils.export_scores import (
@@ -367,6 +369,35 @@ async def export_score_comparison(
         out_path,
         media_type=media_type,
         filename=download_name,
+    )
+
+
+@router.post("/feature-list")
+async def export_feature_list(body: dict = Body(...)):
+    """Export selected feature names as a single-sheet Excel workbook."""
+    session_id = str(body.get("session_id") or "").strip()
+    features = body.get("features") or []
+    if not session_id:
+        return Response(content="session_id required", status_code=400)
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+    if not isinstance(features, list) or not features:
+        return Response(content="features list required", status_code=400)
+    clean = [str(f).strip() for f in features if str(f).strip()]
+    if not clean:
+        return Response(content="No valid feature names", status_code=400)
+
+    sess_dir = session_dir(session_id)
+    os.makedirs(sess_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    out_path = os.path.join(sess_dir, f"final_feature_list_{stamp}.xlsx")
+    pd.DataFrame({"feature": clean}).to_excel(out_path, index=False, sheet_name="Features")
+
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="final_feature_list.xlsx",
     )
 
 

@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { ArrowRight, ArrowLeft, Award, Target, ShieldAlert, ShieldCheck, AlertTriangle } from "lucide-react";
 import { runAgent } from "@/services/api";
 import { SHOW_POLICY_GUARDRAILS } from "@/config/uiVisibility";
 import { usePersistedState, useSession } from "@/contexts/session";
-import { ChartCard, ChartPlot } from "@/components/charts";
+import { ChartCard, ChartPlot, RocDiagonalReferenceLine } from "@/components/charts";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { CARD_CHART_HEIGHT, CARD_CHART_HEIGHT_RADAR } from "@/lib/chartLayout";
@@ -24,6 +24,12 @@ import {
   type EvaluationMetricRow,
 } from "@/components/evaluation/EvaluationMetricsTable";
 import { EvaluationRankOrderBreak } from "@/components/evaluation/EvaluationRankOrderBreak";
+import { EvaluationXgbImportance } from "@/components/evaluation/EvaluationXgbImportance";
+import type { XgboostImportancePayload } from "@/components/evaluation/EvaluationXgbImportance";
+import {
+  EvaluationShapImportance,
+  type ShapImportancePayload,
+} from "@/components/evaluation/EvaluationShapImportance";
 import {
   Table,
   TableBody,
@@ -34,31 +40,34 @@ import {
 } from "@/components/ui/table";
 import {
   EVALUATION_DATA_KEYS,
+  EVALUATION_KS_COHORTS,
   EVALUATION_SERIES,
+  evaluationKsCurvePoints,
+  type EvaluationCohortKey,
 } from "@/config/evaluation";
 import { buildEvaluationRadarRows, type RadarChartRow } from "@/lib/evaluationRadar";
+import { KsChart } from "@/components/diagnostics/KsChart";
+import { toKsChartData } from "@/lib/ksCurve";
 import type { ChartTheme } from "@/lib/chartTheme";
+import {
+  evaluationMetricVisibility,
+  inventoryMetricsForModel,
+  metricsSelectionKey,
+  normalizeProblemType,
+  performanceMetricsForProblem,
+} from "@/config/inventoryMetrics";
+import {
+  cohortArrayFromReport,
+  cohortMetricFromReport,
+  cohortMetricFromReportWithFallback,
+  cohortRocFromReport,
+} from "@/lib/evaluationReport";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell, ReferenceLine,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   LineChart, Line,
 } from "recharts";
-
-type EvaluationCohortKey = "champion_hold" | "champion_oos" | "recalibrated_oos";
-
-function cohortFromReport(
-  report: Record<string, unknown>,
-  cohort: EvaluationCohortKey,
-  field: string,
-  legacy?: string,
-): number {
-  const cohorts = report.evaluation_cohorts as Record<string, Record<string, unknown>> | undefined;
-  const nested = cohorts?.[cohort]?.[field];
-  if (nested != null && nested !== "") return Number(nested);
-  if (legacy) return Number(report[legacy] ?? 0);
-  return 0;
-}
 
 function EvaluationRadarTooltip({
   active,
@@ -212,45 +221,101 @@ export default function Evaluation() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(!!evaluationResult);
   const [report, setReport] = useState<Record<string, unknown> | null>(evaluationResult);
+  const [error, setError] = useState("");
   const [guardrailOverride, setGuardrailOverride] = useState(false);
-  const autoStartedRef = useRef(false);
+  const agentLaunchRef = useRef(false);
   const theme = useChartTheme();
-  // Always prefer currently selected model type to avoid stale report rendering.
-  const problemType = String(selectedModel?.problem_type || report?.problem_type || "classification")
-    .toLowerCase()
-    .startsWith("reg")
-    ? "regression"
-    : "classification";
+  const problemType = normalizeProblemType(selectedModel?.problem_type || report?.problem_type);
+  const selectedModelId = selectedModel?.model_id ?? "";
+  const inventoryMetrics = useMemo(
+    () => inventoryMetricsForModel(inventoryConfigs, selectedModelId),
+    [inventoryConfigs, selectedModelId],
+  );
+  const performanceMetrics = useMemo(
+    () => performanceMetricsForProblem(inventoryMetrics, problemType),
+    [inventoryMetrics, problemType],
+  );
+  const visibility = useMemo(
+    () => evaluationMetricVisibility(inventoryMetrics, problemType),
+    [inventoryMetrics, problemType],
+  );
+  const metricsKey = useMemo(() => metricsSelectionKey(performanceMetrics), [performanceMetrics]);
 
-  const startAgent = async () => {
-    if (!sessionId) return;
-    setRunning(true);
-    setDone(false);
-    await runAgent(sessionId, "evaluation");
-  };
+  const launchEvaluationAgent = useCallback(async () => {
+    if (!sessionId || performanceMetrics.length === 0) return;
+    if (agentLaunchRef.current) return;
+    agentLaunchRef.current = true;
+    setError("");
+    try {
+      await runAgent(sessionId, "evaluation", {
+        drift_metrics: inventoryMetrics,
+        evaluation_metrics: inventoryMetrics,
+      });
+    } catch (err) {
+      agentLaunchRef.current = false;
+      setRunning(false);
+      setError(err instanceof Error ? err.message : "Failed to start evaluation agent");
+    }
+  }, [sessionId, inventoryMetrics, performanceMetrics.length]);
 
   useEffect(() => {
-    if (!sessionId || running || done || !!report || autoStartedRef.current) return;
-    autoStartedRef.current = true;
-    setReport(null);
-    setDone(false);
-    void startAgent();
-  }, [sessionId, running, done, report]);
+    if (!report) return;
+    const reportKey = metricsSelectionKey(
+      ((report.selected_metrics as string[]) || []).filter((m) => performanceMetrics.includes(m as never)),
+    );
+    if (reportKey && reportKey !== metricsKey) {
+      setReport(null);
+      setEvaluationResult(null);
+      setDone(false);
+      agentLaunchRef.current = false;
+    }
+  }, [metricsKey, report, performanceMetrics, setEvaluationResult]);
+
+  useEffect(() => {
+    if (!sessionId || done || report) return;
+    if (performanceMetrics.length === 0) return;
+    setRunning(true);
+  }, [sessionId, done, report, performanceMetrics.length]);
+
+  useEffect(() => {
+    if (!running || !sessionId || done || report || performanceMetrics.length === 0) return;
+    void launchEvaluationAgent();
+  }, [running, sessionId, done, report, performanceMetrics.length, launchEvaluationAgent]);
 
   const handleCompleted = (r: unknown) => {
-    const rep = r as Record<string, unknown>;
+    const rep = r as Record<string, unknown> | null;
+    if (!rep || typeof rep !== "object") {
+      agentLaunchRef.current = false;
+      setRunning(false);
+      setDone(false);
+      setError("Evaluation finished but returned no report data.");
+      return;
+    }
+    setError("");
     setReport(rep);
     setEvaluationResult(rep);
     setRunning(false);
     setDone(true);
   };
 
-  const holdLift = (report?.champion_hold_lift_table || report?.orig_lift_table || []) as Array<{
-    decile: number;
-    lift: number;
-  }>;
-  const championOosLift = (report?.orig_lift_table || []) as Array<{ decile: number; lift: number }>;
-  const recalOosLift = (report?.new_lift_table || []) as Array<{ decile: number; lift: number }>;
+  const holdLift = cohortArrayFromReport<{ decile: number; lift: number }>(
+    report,
+    "champion_hold",
+    "lift_table",
+    "champion_hold_lift_table",
+  );
+  const championOosLift = cohortArrayFromReport<{ decile: number; lift: number }>(
+    report,
+    "champion_oos",
+    "lift_table",
+    "orig_lift_table",
+  );
+  const recalOosLift = cohortArrayFromReport<{ decile: number; lift: number }>(
+    report,
+    "recalibrated_oos",
+    "lift_table",
+    "new_lift_table",
+  );
   const liftRows = Math.max(holdLift.length, championOosLift.length, recalOosLift.length);
   const liftData = Array.from({ length: liftRows }).map((_, i) => ({
     decile: `D${championOosLift[i]?.decile ?? holdLift[i]?.decile ?? i + 1}`,
@@ -269,9 +334,9 @@ export default function Evaluation() {
         tpr: Number((roc.tpr[idx * step] ?? 0).toFixed(3)),
       }));
   };
-  const holdRocPts = downsampleRoc(report?.champion_hold_roc as { fpr: number[]; tpr: number[] } | undefined);
-  const championOosRocPts = downsampleRoc(report?.orig_roc as { fpr: number[]; tpr: number[] } | undefined);
-  const recalOosRocPts = downsampleRoc(report?.new_roc as { fpr: number[]; tpr: number[] } | undefined);
+  const holdRocPts = downsampleRoc(cohortRocFromReport(report, "champion_hold", "champion_hold_roc"));
+  const championOosRocPts = downsampleRoc(cohortRocFromReport(report, "champion_oos", "orig_roc"));
+  const recalOosRocPts = downsampleRoc(cohortRocFromReport(report, "recalibrated_oos", "new_roc"));
   const rocLen = Math.max(holdRocPts.length, championOosRocPts.length, recalOosRocPts.length);
   const rocData = Array.from({ length: rocLen }).map((_, i) => ({
     fpr: Number((championOosRocPts[i]?.fpr ?? holdRocPts[i]?.fpr ?? recalOosRocPts[i]?.fpr ?? 0).toFixed(3)),
@@ -280,39 +345,45 @@ export default function Evaluation() {
     [EVALUATION_DATA_KEYS.recalibratedOos]: recalOosRocPts[i]?.tpr ?? 0,
   }));
 
-  type KsPt = { population_pct: number; ks: number };
-  const holdKsPts = (report?.champion_hold_ks_curve || []) as KsPt[];
-  const oosKsPts = (report?.orig_ks_curve || []) as KsPt[];
-  const recalKsPts = (report?.new_ks_curve || []) as KsPt[];
-  const ksLen = Math.max(holdKsPts.length, oosKsPts.length, recalKsPts.length);
-  const ksData = Array.from({ length: ksLen }).map((_, i) => ({
-    population_pct: Number(holdKsPts[i]?.population_pct ?? oosKsPts[i]?.population_pct ?? recalKsPts[i]?.population_pct ?? 0),
-    [EVALUATION_DATA_KEYS.championHold]: Number(holdKsPts[i]?.ks ?? 0),
-    [EVALUATION_DATA_KEYS.championOos]: Number(oosKsPts[i]?.ks ?? 0),
-    [EVALUATION_DATA_KEYS.recalibratedOos]: Number(recalKsPts[i]?.ks ?? 0),
-  }));
+  const ksCohorts = useMemo(
+    () =>
+      EVALUATION_KS_COHORTS.map((cfg) => ({
+        key: cfg.key,
+        label: cfg.label,
+        color: theme.series[cfg.colorKey],
+        points: evaluationKsCurvePoints(report, cfg.cohort),
+      })).filter((c) => c.points.length > 0),
+    [report, theme.series.train, theme.series.dev, theme.series.new],
+  );
 
   const impTable = ((report?.importance_table || []) as Array<{ feature: string; orig_importance: number; new_importance: number }>)
     .slice(0, 10);
-  const selectedModelId = selectedModel?.model_id || "";
-  const selectedConfigs = new Set(inventoryConfigs[selectedModelId] || []);
-  const showAuc = selectedConfigs.has("AUC");
-  const showKs = selectedConfigs.has("KS");
-  const showGini = selectedConfigs.has("GINI");
-  const showCalibration = selectedConfigs.has("Calibration");
-  const showLift = selectedConfigs.has("Lift/Gains");
-  const showFeatureImportance = selectedConfigs.has("Feature Importance");
-  const showRmse = selectedConfigs.has("RMSE");
-  const showMae = selectedConfigs.has("MAE");
-  const showR2 = selectedConfigs.has("R2");
-  const hasRegressionMetrics = showRmse || showMae || showR2;
-  const hasClassificationMetrics =
-    showAuc || showKs || showGini || showCalibration || showLift || showFeatureImportance;
-  const showMetricsForProblem = problemType === "regression" ? hasRegressionMetrics : hasClassificationMetrics;
+  const xgboostImportance = (report?.xgboost_importance || null) as XgboostImportancePayload | null;
+  const {
+    showAuc,
+    showKs,
+    showGini,
+    showCalibration,
+    showLift,
+    showFeatureImportance,
+    showRmse,
+    showMae,
+    showR2,
+    hasAny: showMetricsForProblem,
+  } = visibility;
+  const modelClass = String(selectedModel?.model_class ?? "");
+  const isXgbModel = /xgb/i.test(modelClass);
+  const showXgbNativeImportance =
+    showMetricsForProblem &&
+    (isXgbModel || Boolean(xgboostImportance?.available));
+  const shapImportance = (report?.shap_importance || null) as ShapImportancePayload | null;
+  const showShapImportance =
+    showMetricsForProblem &&
+    (showFeatureImportance || showXgbNativeImportance || Boolean(shapImportance?.available));
   const evaluationMetricRows = useMemo((): EvaluationMetricRow[] => {
     if (!report) return [];
     const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
-      cohortFromReport(report, cohort, field, legacy);
+      cohortMetricFromReport(report, cohort, field, legacy);
     const rows: EvaluationMetricRow[] = [];
 
     if (problemType === "regression") {
@@ -349,6 +420,12 @@ export default function Evaluation() {
           hold: m("champion_hold", "auc", "champion_hold_auc"),
           oos: m("champion_oos", "auc", "orig_auc"),
           recal: m("recalibrated_oos", "auc", "new_auc"),
+        });
+        rows.push({
+          metric: "AUC-PR",
+          hold: m("champion_hold", "auc_pr", "champion_hold_auc_pr"),
+          oos: m("champion_oos", "auc_pr", "orig_auc_pr"),
+          recal: m("recalibrated_oos", "auc_pr", "new_auc_pr"),
         });
       }
       if (showKs) {
@@ -405,7 +482,10 @@ export default function Evaluation() {
   const radarData = useMemo(() => {
     if (!report || !showMetricsForProblem) return [] as RadarChartRow[];
     const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
-      cohortFromReport(report, cohort, field, legacy);
+      cohortMetricFromReport(report, cohort, field, legacy);
+    const mAucPr = (cohort: EvaluationCohortKey, legacy?: string) =>
+      cohortMetricFromReportWithFallback(report, cohort, "auc_pr", legacy, 0);
+    const finite = (v: number) => Number.isFinite(v);
 
     const specs =
       problemType === "regression"
@@ -423,6 +503,16 @@ export default function Evaluation() {
         : [
             ...(showAuc
               ? [{ axis: "AUC", hold: m("champion_hold", "auc", "champion_hold_auc"), oos: m("champion_oos", "auc", "orig_auc"), recal: m("recalibrated_oos", "auc", "new_auc"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              : []),
+            ...(showAuc
+              ? [{
+                  axis: "AUC-PR",
+                  hold: mAucPr("champion_hold", "champion_hold_auc_pr"),
+                  oos: mAucPr("champion_oos", "orig_auc_pr"),
+                  recal: mAucPr("recalibrated_oos", "new_auc_pr"),
+                  higherIsBetter: true as const,
+                  format: (v: number) => v.toFixed(4),
+                }]
               : []),
             ...(showKs
               ? [{ axis: "KS", hold: m("champion_hold", "ks", "champion_hold_ks"), oos: m("champion_oos", "ks", "orig_ks"), recal: m("recalibrated_oos", "ks", "new_ks"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
@@ -452,7 +542,15 @@ export default function Evaluation() {
               : []),
           ];
 
-    return buildEvaluationRadarRows(specs);
+    return buildEvaluationRadarRows(
+      specs.filter(
+        (s) =>
+          s.axis === "AUC-PR" ||
+          finite(s.hold) ||
+          finite(s.oos) ||
+          finite(s.recal),
+      ),
+    );
   }, [report, showMetricsForProblem, problemType, showAuc, showKs, showGini, showLift, showCalibration, showRmse, showMae, showR2]);
 
   const guardrails = (report?.policy_guardrails || null) as Guardrails | null;
@@ -469,14 +567,50 @@ export default function Evaluation() {
         <h1 className="text-2xl font-bold">Model Evaluation</h1>
       </div>
 
+      {error && (
+        <Card className="p-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30">
+          <p className="text-sm text-red-700 dark:text-red-200">{error}</p>
+          {sessionId && performanceMetrics.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => {
+                agentLaunchRef.current = false;
+                setRunning(true);
+                setDone(false);
+                void launchEvaluationAgent();
+              }}
+            >
+              Retry evaluation
+            </Button>
+          )}
+        </Card>
+      )}
+
+      {!running && !done && performanceMetrics.length === 0 && (
+        <Card className="p-4 border-orange-300 bg-orange-50 dark:border-orange-500/30 dark:bg-orange-500/5">
+          <p className="text-xs text-orange-800 dark:text-orange-300">
+            No performance metrics are selected for this model in Inventory. Select at least one performance metric
+            (e.g. AUC, KS, Lift/Gains) and return to this page.
+          </p>
+        </Card>
+      )}
+
       {running && !done && sessionId && (
         <Card className="p-5">
           <h2 className="font-semibold text-sm mb-4">Evaluation Agent</h2>
           <AgentStepper
             sessionId={sessionId}
             agent="evaluation"
+            onStreamConnected={launchEvaluationAgent}
             onCompleted={handleCompleted}
-            onFailed={() => setRunning(false)}
+            onFailed={(msg) => {
+              agentLaunchRef.current = false;
+              setRunning(false);
+              setError(msg || "Evaluation agent failed");
+            }}
           />
         </Card>
       )}
@@ -492,13 +626,54 @@ export default function Evaluation() {
           ) : (
             <Card className="p-4 border-orange-300 bg-orange-50 dark:border-orange-500/30 dark:bg-orange-500/5">
               <p className="text-xs text-orange-800 dark:text-orange-300">
-                No evaluation metrics are selected for this model in Inventory. Select performance metrics and rerun.
+                No performance metrics match this model&apos;s problem type in Inventory ({problemType}). Select metrics
+                such as {problemType === "regression" ? "RMSE, MAE, or R²" : "AUC, KS, or Lift/Gains"} and rerun evaluation.
               </p>
             </Card>
           )}
 
-          <div className={`grid grid-cols-1 ${problemType === "classification" && rocData.length > 0 ? "xl:grid-cols-2" : ""} gap-4`}>
-            {radarData.length > 0 && (
+          <div className="space-y-4">
+            <div
+              className={`grid grid-cols-1 ${
+                problemType === "classification" &&
+                showAuc &&
+                rocData.length > 0 &&
+                radarData.length > 0
+                  ? "xl:grid-cols-2"
+                  : ""
+              } gap-4`}
+            >
+              {problemType === "classification" && showAuc && rocData.length > 0 && (
+                <ChartCard
+                  title="ROC Curves"
+                  subtitle="Receiver Operating Characteristic — higher curve = better discrimination"
+                >
+                  <ChartFrame
+                    theme={theme}
+                    height={CARD_CHART_HEIGHT}
+                    legend={[
+                      { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
+                      { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
+                      { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
+                    ]}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={rocData} margin={chartMargin.xyTitles}>
+                        <CartesianGrid {...cartesianGrid(theme)} />
+                        <XAxis {...chartXAxis(theme, "False positive rate", { dataKey: "fpr", type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
+                        <YAxis {...chartYAxis(theme, "True positive rate", { type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
+                        <Tooltip formatter={(v: number) => v.toFixed(3)} {...chartTooltipProps(theme, { cursor: "line" })} />
+                        <RocDiagonalReferenceLine theme={theme} />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.trainFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.devFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.newFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </ChartFrame>
+                </ChartCard>
+              )}
+
+              {radarData.length > 0 && (
                 <ChartCard
                   title="Multi-Metric Radar"
                   subtitle="Each axis scales 0–100 from the max of all three cohorts on that metric (hover for raw values)."
@@ -515,30 +690,23 @@ export default function Evaluation() {
                     <ResponsiveContainer width="100%" height="100%">
                       <RadarChart
                         data={radarData}
-                        margin={chartMargin.radar}
-                        outerRadius="90%"
+                        margin={{ ...chartMargin.radar, top: 28, right: 36, bottom: 28, left: 36 }}
+                        outerRadius="72%"
                         cx="50%"
                         cy="50%"
                       >
                         <PolarGrid stroke={theme.radar.grid} />
                         <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: theme.axis }} tickLine={false} />
-                        <PolarRadiusAxis
-                          angle={90}
-                          domain={[0, 100]}
-                          tick={{ fontSize: 9, fill: theme.axis }}
-                          stroke={theme.axisLine}
-                          axisLine={false}
-                          tickCount={5}
-                        />
-                        <Radar dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} fill={theme.series.trainFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
-                        <Radar dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} fill={theme.series.devFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
-                        <Radar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} fill={theme.series.newFill} fillOpacity={0.15} strokeWidth={2} legendType="none" />
+                        <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} stroke={theme.axisLine} />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.championHold} stroke={theme.series.train} fill={theme.series.trainFill} fillOpacity={theme.plot.radarFillOpacity} strokeWidth={theme.plot.lineStrokeWidth} legendType="none" />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.championOos} stroke={theme.series.dev} fill={theme.series.devFill} fillOpacity={theme.plot.radarFillOpacity} strokeWidth={theme.plot.lineStrokeWidth} legendType="none" />
+                        <Radar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} stroke={theme.series.new} fill={theme.series.newFill} fillOpacity={theme.plot.radarFillOpacity} strokeWidth={theme.plot.lineStrokeWidth} legendType="none" />
                         <Tooltip
                           cursor={false}
                           content={(props) => (
                             <EvaluationRadarTooltip
                               active={props.active}
-                              payload={props.payload as Array<{ payload?: RadarChartRow }>}
+                              payload={props.payload as unknown as Array<{ payload?: RadarChartRow }>}
                               theme={theme}
                             />
                           )}
@@ -547,67 +715,21 @@ export default function Evaluation() {
                     </ResponsiveContainer>
                   </ChartFrame>
                 </ChartCard>
-            )}
+              )}
+            </div>
 
-            {/* ROC curves — area fill */}
-            {problemType === "classification" && showAuc && rocData.length > 0 && (
-              <ChartCard
-                title="ROC Curves"
-                subtitle="Receiver Operating Characteristic — higher curve = better discrimination"
-              >
-                <ChartFrame
-                  theme={theme}
-                  height={CARD_CHART_HEIGHT}
-                  legend={[
-                    { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
-                    { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
-                    { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
-                  ]}
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={rocData} margin={chartMargin.xyTitles}>
-                      <CartesianGrid {...cartesianGrid(theme)} />
-                      <XAxis {...chartXAxis(theme, "False positive rate", { dataKey: "fpr", type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
-                      <YAxis {...chartYAxis(theme, "True positive rate", { type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
-                      <Tooltip formatter={(v: number) => v.toFixed(3)} {...chartTooltipProps(theme, { cursor: "line" })} />
-                      <ReferenceLine x={1} y={1} stroke={theme.axisLine} strokeDasharray="4 4" />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={2} fill={theme.series.trainFill} fillOpacity={0.2} dot={false} legendType="none" />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={2} fill={theme.series.devFill} fillOpacity={0.25} dot={false} legendType="none" />
-                      <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={2} fill={theme.series.newFill} fillOpacity={0.2} dot={false} legendType="none" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </ChartFrame>
-              </ChartCard>
+            {problemType === "classification" && showKs && ksCohorts.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {ksCohorts.map((cohort) => (
+                  <ChartCard key={cohort.key} title={`KS Curve — ${cohort.label}`} className="w-full">
+                    <KsChart data={toKsChartData(cohort.points)} />
+                  </ChartCard>
+                ))}
+              </div>
             )}
           </div>
 
-          {problemType === "classification" && showKs && ksData.length > 0 && (
-            <ChartCard title="KS Curves" subtitle="Kolmogorov–Smirnov separation across cohorts (balanced axes)">
-              <ChartFrame
-                theme={theme}
-                height={CARD_CHART_HEIGHT}
-                legend={[
-                  { value: EVALUATION_SERIES.championHold, type: "line", color: theme.series.train, dataKey: EVALUATION_DATA_KEYS.championHold },
-                  { value: EVALUATION_SERIES.championOos, type: "line", color: theme.series.dev, dataKey: EVALUATION_DATA_KEYS.championOos },
-                  { value: EVALUATION_SERIES.recalibratedOos, type: "line", color: theme.series.new, dataKey: EVALUATION_DATA_KEYS.recalibratedOos },
-                ]}
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={ksData} margin={chartMargin.xyTitles}>
-                    <CartesianGrid {...cartesianGrid(theme)} />
-                    <XAxis {...chartXAxis(theme, "Population (%)", { dataKey: "population_pct", type: "number", domain: [0, 100] })} />
-                    <YAxis {...chartYAxis(theme, "KS statistic", { type: "number", domain: [0, "auto"] })} />
-                    <Tooltip formatter={(v: number) => v.toFixed(4)} {...chartTooltipProps(theme, { cursor: "line" })} />
-                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={2} dot={false} legendType="none" />
-                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={2} dot={false} legendType="none" />
-                    <Line type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={2} dot={false} legendType="none" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartFrame>
-            </ChartCard>
-          )}
-
-          {problemType === "classification" && report && (
+          {problemType === "classification" && showLift && report && (
             <EvaluationRankOrderBreak
               report={report}
               theme={theme}
@@ -641,9 +763,9 @@ export default function Evaluation() {
                     <YAxis {...chartYAxis(theme, "Lift (×)", {})} />
                     <Tooltip formatter={(v: number) => `${v.toFixed(3)}x`} {...chartTooltipProps(theme)} />
                     <ReferenceLine y={1} stroke={theme.axisLine} strokeDasharray="4 4" label={{ value: "Baseline", fontSize: 9, fill: theme.axis }} />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
-                    <Bar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} fill={theme.series.newFill} stroke={theme.series.new} radius={[3, 3, 0, 0]} opacity={0.85} legendType="none" />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={theme.plot.barStrokeWidth} radius={[3, 3, 0, 0]} opacity={theme.plot.barLayerOpacity} legendType="none" />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} strokeWidth={theme.plot.barStrokeWidth} radius={[3, 3, 0, 0]} opacity={theme.plot.barLayerOpacity} legendType="none" />
+                    <Bar dataKey={EVALUATION_DATA_KEYS.recalibratedOos} fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} radius={[3, 3, 0, 0]} opacity={theme.plot.barLayerOpacity} legendType="none" />
                   </BarChart>
                 </ResponsiveContainer>
               </ChartFrame>
@@ -686,6 +808,14 @@ export default function Evaluation() {
                 </Table>
               </div>
             </Card>
+          )}
+
+          {showXgbNativeImportance && (
+            <EvaluationXgbImportance payload={xgboostImportance} />
+          )}
+
+          {showShapImportance && (
+            <EvaluationShapImportance payload={shapImportance} />
           )}
 
           <div className="flex justify-end">

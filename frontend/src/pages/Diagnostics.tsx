@@ -372,19 +372,19 @@ export default function Diagnostics() {
 
           {activeTab === "data" && (
 
-            <DataDriftTab report={report as Record<string, unknown>} />
+            <DataDriftTab report={report as Record<string, unknown>} selectedMetrics={metrics} />
 
           )}
 
           {activeTab === "concept" && (
 
-            <ConceptDriftTab report={report as Record<string, unknown>} />
+            <ConceptDriftTab report={report as Record<string, unknown>} selectedMetrics={metrics} />
 
           )}
 
           {activeTab === "performance" && (
 
-            <PerfDriftTab report={report as Record<string, unknown>} />
+            <PerfDriftTab report={report as Record<string, unknown>} selectedMetrics={metrics} />
 
           )}
 

@@ -168,7 +168,8 @@ export default function ModelInventory() {
   const handleSelect = async (model: ModelEntry) => {
     if (!sessionId) return;
     setSelecting(model.model_id);
-    await selectModel(sessionId, model.model_id, model);
+    const picked = selectedConfigs[model.model_id] || [];
+    await selectModel(sessionId, model.model_id, model, picked);
     setSelectedModel(model as unknown as Record<string, string>);
     setStep(1);
     navigate("/ingestion");

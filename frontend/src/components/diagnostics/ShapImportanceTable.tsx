@@ -1,4 +1,3 @@
-import { perfBaselineLabel, perfNewLabel } from "@/config/datasets";
 import {
   Table,
   TableBody,
@@ -7,6 +6,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+const DEV_IMPORTANCE_LABEL = "Dev val";
+const NEW_IMPORTANCE_LABEL = "New val";
 
 export type ShapImportanceRow = {
   feature: string;
@@ -71,14 +73,14 @@ export function ShapImportanceTable({ rows, rankView = "delta" }: ShapImportance
             <TableHead className="text-xs">Feature</TableHead>
             {rankView === "absolute" ? (
               <>
-                <TableHead className="text-xs text-right">{perfBaselineLabel()} rank</TableHead>
-                <TableHead className="text-xs text-right">{perfNewLabel()} rank</TableHead>
+                <TableHead className="text-xs text-right">{DEV_IMPORTANCE_LABEL} #</TableHead>
+                <TableHead className="text-xs text-right">{NEW_IMPORTANCE_LABEL} #</TableHead>
               </>
             ) : (
-              <TableHead className="text-xs text-right">Rank Δ (dev − new)</TableHead>
+              <TableHead className="text-xs text-right">Rank Δ</TableHead>
             )}
-            <TableHead className="text-xs">{perfBaselineLabel()} importance</TableHead>
-            <TableHead className="text-xs">{perfNewLabel()} importance</TableHead>
+            <TableHead className="text-xs">{DEV_IMPORTANCE_LABEL}</TableHead>
+            <TableHead className="text-xs">{NEW_IMPORTANCE_LABEL}</TableHead>
             <TableHead className="text-xs">Rating</TableHead>
           </TableRow>
         </TableHeader>

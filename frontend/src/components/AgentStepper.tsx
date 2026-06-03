@@ -71,7 +71,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "score_oot_with_original", name: `Score ${HOLD} and ${NEW_VAL} (champion + recalibrated)`, status: "pending" },
     { id: "compute_performance_metrics", name: "Compute performance metrics (AUC, KS, lift)", status: "pending" },
     { id: "compute_variable_experience", name: "Compute variable importance comparison", status: "pending" },
-    { id: "compute_score_migration", name: "Compute 10×10 score migration matrix", status: "pending" },
+    { id: "compute_score_migration", name: "Score decile migration (champion vs recalibrated)", status: "pending" },
     { id: "compute_top_decile_overlap", name: "Compute top-decile customer overlap (Jaccard)", status: "pending" },
     { id: "assemble_export_artifacts", name: "Assemble export artifacts", status: "pending" },
   ],
@@ -103,7 +103,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
   drift: {
     load_context: `Load processed ${DEV}, ${NEW}, ${HOLD}, and ${NEW_VAL}; model feature list from .pkl; thresholds from inventory.`,
     compute_data_drift: `Compute PSI, CSI, missingness, cardinality, and target-rate drift between ${DEV} and ${NEW}.`,
-    compute_concept_drift: `Compute IV, univariate AUC, and bivariate monotonicity on model features (${DEV} vs ${NEW}).`,
+    compute_concept_drift: `Compute IV, univariate Gini (raw variable AUC), and bivariate monotonicity (${HOLD} vs ${NEW}).`,
     compute_performance_drift: `Compare ROC, KS, lift, and calibration between ${HOLD} and ${NEW_VAL}.`,
     compute_interpretability: "Compute SHAP-style feature importance and partial dependence profiles where configured.",
     assemble_report: "Merge all diagnostic signals, apply governance rules, and produce the recommendation verdict.",
@@ -124,7 +124,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
       `Calculate inventory-selected metrics for champion on ${HOLD} and ${NEW_VAL}, and recalibrated on ${NEW_VAL}.`,
     compute_variable_experience: "Compare feature importance ranks between champion and recalibrated models.",
     compute_score_migration:
-      `Build decile migration matrix on ${NEW_VAL} between champion and recalibrated scores.`,
+      `On ${NEW_VAL}, assign each account to score deciles (1–10) for champion and recalibrated models, then summarize how deciles shift.`,
     compute_top_decile_overlap:
       `Measure Jaccard overlap of top-decile accounts on ${NEW_VAL} between champion and recalibrated models.`,
     assemble_export_artifacts: "Package evaluation tables and charts for download/export.",
@@ -153,6 +153,10 @@ function buildTasksFromEvents(
     if (type === "heartbeat") continue;
     if (type === "started") {
       logs.push("▶ Agent started");
+      const pendingCount = tasks.filter((t) => t.status === "pending").length;
+      if (pendingCount > 0 && progressPct === 0) {
+        progressPct = 1;
+      }
       continue;
     }
     if (type === "task") {
@@ -208,7 +212,13 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
   const completedNotifiedRef = useRef(false);
   const streamConnectedRef = useRef(false);
   const agentRunStartedRef = useRef(false);
+  const onStreamConnectedRef = useRef(onStreamConnected);
   const eventsRef = useRef<Record<string, unknown>[]>([]);
+  const notStartedPollsRef = useRef(0);
+
+  useEffect(() => {
+    onStreamConnectedRef.current = onStreamConnected;
+  }, [onStreamConnected]);
 
   const taskHelp = TASK_HELP[agent] ?? {};
   const defaultTasks = DEFAULT_AGENT_TASKS[agent] ?? [];
@@ -253,22 +263,57 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
     streamConnectedRef.current = false;
     agentRunStartedRef.current = false;
     completedNotifiedRef.current = false;
+    notStartedPollsRef.current = 0;
+
+    const markStreamLive = (hint?: string) => {
+      if (streamConnectedRef.current) return;
+      streamConnectedRef.current = true;
+      setLogs((l) => {
+        if (l[0] !== "Connecting…") return l;
+        return [hint ?? `Live stream · ${agent} agent`];
+      });
+    };
 
     const kickoffAgentRun = () => {
-      if (!onStreamConnected || agentRunStartedRef.current) return;
+      const start = onStreamConnectedRef.current;
+      if (!start || agentRunStartedRef.current) return;
       agentRunStartedRef.current = true;
-      onStreamConnected();
+      void Promise.resolve(start()).catch(() => {
+        agentRunStartedRef.current = false;
+      });
     };
 
     const pollStatus = () => {
       void getAgentStatus(sessionId, agent)
         .then((snap) => {
           if (statusRef.current === "completed" || statusRef.current === "failed") return;
-          if (snap.status === "not_started") return;
+
+          if (snap.status === "not_started") {
+            notStartedPollsRef.current += 1;
+            if (notStartedPollsRef.current >= 4) {
+              kickoffAgentRun();
+            }
+            if (notStartedPollsRef.current >= 8) {
+              setLogs((l) =>
+                l[0] === "Connecting…"
+                  ? ["Waiting for agent to start…"]
+                  : l,
+              );
+            }
+            return;
+          }
+
+          markStreamLive(`Agent running · ${agent}`);
           const events = snap.events ?? [];
           if (events.length > 0) {
             eventsRef.current = events;
             syncFromEvents(events);
+          } else if (snap.status === "running") {
+            setLogs((l) =>
+              l[0] === "Connecting…" || l[0] === "Waiting for agent to start…"
+                ? [`Agent running · ${agent}`]
+                : l,
+            );
           } else if (snap.status === "completed" || snap.status === "failed") {
             syncFromEvents(eventsRef.current);
           }
@@ -287,7 +332,6 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
         });
     };
 
-    // Start the agent as soon as the stepper mounts (do not wait for SSE — backend used to block until /run).
     kickoffAgentRun();
     pollStatus();
     const pollTimer = window.setInterval(pollStatus, 500);
@@ -296,16 +340,10 @@ export function AgentStepper({ sessionId, agent, onCompleted, onFailed, onStream
     const es = new EventSource(url);
     esRef.current = es;
 
-    const notifyStreamConnected = () => {
-      if (streamConnectedRef.current) return;
-      streamConnectedRef.current = true;
-      setLogs((l) => (l[0] === "Connecting…" ? [`Live stream · ${agent} agent`] : l));
-    };
-
-    es.onopen = () => notifyStreamConnected();
+    es.onopen = () => markStreamLive(`Live stream · ${agent} agent`);
 
     es.onmessage = (e) => {
-      notifyStreamConnected();
+      markStreamLive(`Live stream · ${agent} agent`);
       try {
         const evt = JSON.parse(e.data) as Record<string, unknown>;
         const type = String(evt.event_type ?? "");

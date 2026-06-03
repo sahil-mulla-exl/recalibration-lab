@@ -19,7 +19,7 @@ export const DATA_DRIFT_SECTIONS = [
 ] as const;
 
 export const CONCEPT_DRIFT_SECTIONS = [
-  { id: "iv", label: "IV & Univariate Gini" },
+  { id: "iv", label: "IV & Univariate AUC" },
   { id: "monotonicity", label: "Bivariate" },
 ] as const;
 

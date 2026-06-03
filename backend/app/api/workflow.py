@@ -14,14 +14,18 @@ async def select_model(body: dict):
     hp_method = "random"
     if isinstance(model_entry, dict):
         hp_method = model_entry.get("optimization_method") or "random"
-    update_session(
-        session_id,
-        {
-            "model_id": model_id,
-            "model_entry": model_entry,
-            "hp_method": hp_method,
-        },
-    )
+    inventory_metrics = body.get("inventory_metrics") or []
+    if isinstance(inventory_metrics, str):
+        inventory_metrics = [inventory_metrics]
+    payload = {
+        "model_id": model_id,
+        "model_entry": model_entry,
+        "hp_method": hp_method,
+    }
+    if inventory_metrics:
+        payload["drift_metrics"] = inventory_metrics
+        payload["evaluation_metrics"] = inventory_metrics
+    update_session(session_id, payload)
     return {"ok": True}
 
 

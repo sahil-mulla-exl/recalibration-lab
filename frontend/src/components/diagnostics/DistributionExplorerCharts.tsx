@@ -23,13 +23,6 @@ import {
 } from "@/lib/chartTheme";
 
 
-/** Distinct cohort colors (slate + orange) */
-function csiBarColors(isDark: boolean) {
-  return isDark
-    ? { fill: "rgba(167, 139, 250, 0.8)", stroke: "#c4b5fd" }
-    : { fill: "rgba(79, 70, 229, 0.75)", stroke: "#4338ca" };
-}
-
 type DistributionRow = { bin: string; trainPct: number; newPct: number };
 type ContributionRow = { bin: string; contribution: number };
 
@@ -57,7 +50,7 @@ export function DistributionExplorerCharts({
   contributionRows,
 }: DistributionExplorerChartsProps) {
   const theme = useChartTheme();
-  const csiColors = csiBarColors(theme.isDark);
+  const csiColors = { fill: theme.series.csiFill, stroke: theme.series.csi };
 
   const distData = useMemo(
     () =>
@@ -160,7 +153,7 @@ export function DistributionExplorerCharts({
                 dataKey="trainPct"
                 fill={theme.series.trainFill}
                 stroke={theme.series.train}
-                strokeWidth={1}
+                strokeWidth={theme.plot.barStrokeWidth}
                 radius={[2, 2, 0, 0]}
                 legendType="none"
               />
@@ -168,7 +161,7 @@ export function DistributionExplorerCharts({
                 dataKey="newPct"
                 fill={theme.series.newFill}
                 stroke={theme.series.new}
-                strokeWidth={1}
+                strokeWidth={theme.plot.barStrokeWidth}
                 radius={[2, 2, 0, 0]}
                 legendType="none"
               />
@@ -201,7 +194,7 @@ export function DistributionExplorerCharts({
                 dataKey="contribution"
                 fill={csiColors.fill}
                 stroke={csiColors.stroke}
-                strokeWidth={1}
+                strokeWidth={theme.plot.barStrokeWidth}
                 radius={[2, 2, 0, 0]}
                 legendType="none"
               />

@@ -62,9 +62,9 @@ export function DecileChart({ data }: DecileChartProps) {
 
           <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
 
-          <Bar dataKey="dev" fill={theme.series.devFill} stroke={theme.series.dev} strokeWidth={1} legendType="none" />
+          <Bar dataKey="dev" fill={theme.series.devFill} stroke={theme.series.dev} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
 
-          <Bar dataKey="current" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={1} legendType="none" />
+          <Bar dataKey="current" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
 
         </BarChart>
 

@@ -8,20 +8,23 @@ import { IvStrengthChart } from "@/components/diagnostics/IvStrengthChart";
 import { MonotonicityChart } from "@/components/diagnostics/MonotonicityChart";
 
 import { driftBaselineLabel, driftCompareSubtitle, INGESTION_DATASETS } from "@/config/datasets";
+import { hasInventoryMetric, INVENTORY_CONCEPT_DRIFT } from "@/config/inventoryMetrics";
+import { Card } from "@/components/ui/card";
 
 import { UnivariateAucChart } from "@/components/diagnostics/UnivariateAucChart";
 
 
 
 type ConceptDriftTabProps = {
-
   report: Record<string, unknown>;
-
+  selectedMetrics?: string[];
 };
 
-
-
-export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
+export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTabProps) {
+  const showIv = hasInventoryMetric(selectedMetrics, "IV");
+  const showWoe = hasInventoryMetric(selectedMetrics, "WOE");
+  const hasConceptConfig =
+    INVENTORY_CONCEPT_DRIFT.some((m) => hasInventoryMetric(selectedMetrics, m)) || showIv || showWoe;
   const [ivSort, setIvSort] = useState<"rank" | "delta">("delta");
 
   const [ivTop, setIvTop] = useState<number>(15);
@@ -36,7 +39,10 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
   const iv = (concept.iv ?? {}) as Record<string, { iv_train?: number; iv_new?: number; delta?: number; rating?: string }>;
 
-  const uniAuc = (concept.univariate_auc ?? {}) as Record<string, { train_auc?: number; new_auc?: number }>;
+  const uniGini = (concept.univariate_gini ?? concept.univariate_auc ?? {}) as Record<
+    string,
+    { dev_gini?: number; new_gini?: number; train_auc?: number; new_auc?: number; delta?: number }
+  >;
 
   const bivariate = (concept.bivariate_monotonicity ?? {}) as Record<
 
@@ -88,27 +94,31 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
   }, [iv, ivSort, ivTop]);
 
-  const giniRows = useMemo(() => {
-
-    const rows = Object.entries(uniAuc).map(([feature, vals]) => {
-
-      const trainAuc = Number(vals.train_auc ?? 0);
-
-      const newAuc = Number(vals.new_auc ?? 0);
-
-      const trainGini = 2 * trainAuc - 1;
-
-      const newGini = 2 * newAuc - 1;
-
-      return { feature, trainAuc: trainGini, newAuc: newGini, delta: newGini - trainGini };
-
-    });
-
-    rows.sort((a, b) => (aucSort === "rank" ? b.trainAuc - a.trainAuc : a.delta - b.delta));
-
+  const aucRows = useMemo(() => {
+    const rows = Object.entries(uniGini)
+      .map(([feature, vals]) => {
+        const devAuc =
+          vals.dev_auc != null
+            ? Number(vals.dev_auc)
+            : vals.train_auc != null
+              ? Number(vals.train_auc)
+              : vals.dev_gini != null
+                ? (Number(vals.dev_gini) + 1) / 2
+                : null;
+        const newAuc =
+          vals.new_auc != null
+            ? Number(vals.new_auc)
+            : vals.new_gini != null
+              ? (Number(vals.new_gini) + 1) / 2
+              : null;
+        if (devAuc == null || newAuc == null) return null;
+        const delta = newAuc - devAuc;
+        return { feature, devAuc, newAuc, delta };
+      })
+      .filter((r): r is NonNullable<typeof r> => r != null);
+    rows.sort((a, b) => (aucSort === "rank" ? b.devAuc - a.devAuc : a.delta - b.delta));
     return rows.slice(0, aucTop === 9999 ? rows.length : aucTop);
-
-  }, [uniAuc, aucSort, aucTop]);
+  }, [uniGini, aucSort, aucTop]);
 
   const bivariateData = useMemo(() => {
 
@@ -160,12 +170,22 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
 
 
-  return (
+  if (!hasConceptConfig) {
+    return (
+      <Card className="p-4 border-orange-300 bg-orange-50 dark:border-orange-500/30 dark:bg-orange-500/5">
+        <p className="text-xs text-orange-800 dark:text-orange-300">
+          No concept drift metrics are selected in Inventory (Target Shift, IV, WOE). Select metrics on the Inventory
+          page and rerun diagnostics.
+        </p>
+      </Card>
+    );
+  }
 
+  return (
     <div className="space-y-4">
       <div className="space-y-4">
+          {showIv && (
           <ChartCard
-
             title="Information Value (IV)"
 
             subtitle={`Model features from .pkl — ${driftCompareSubtitle()} IV`}
@@ -205,14 +225,14 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
           >
 
             <IvStrengthChart rows={ivRows} />
-
           </ChartCard>
+          )}
 
+          {showIv && (
           <ChartCard
+            title="Univariate Variable AUC"
 
-            title="Univariate Variable Gini"
-
-            subtitle="Model features from .pkl — single-feature Gini stability (2×AUC − 1)"
+            subtitle={`${INGESTION_DATASETS.hold_data.label} vs ${INGESTION_DATASETS.new_data.label} — raw variable ROC-AUC (no model fit)`}
 
             actions={(
 
@@ -222,9 +242,9 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
                 <select className="h-8 rounded border px-2 bg-background" value={aucSort} onChange={(e) => setAucSort(e.target.value as "rank" | "delta")}>
 
-                  <option value="rank">Gini rank ({driftBaselineLabel()})</option>
+                  <option value="rank">AUC rank ({INGESTION_DATASETS.hold_data.label})</option>
 
-                  <option value="delta">Gini decline (worst first)</option>
+                  <option value="delta">AUC decline (worst first)</option>
 
                 </select>
 
@@ -246,11 +266,16 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
 
           >
 
-            <UnivariateAucChart rows={giniRows} />
-
+            <UnivariateAucChart
+              rows={aucRows}
+              baselineLabel={INGESTION_DATASETS.hold_data.label}
+              compareLabel={INGESTION_DATASETS.new_data.label}
+            />
           </ChartCard>
+          )}
       </div>
 
+        {showWoe && (
         <ChartCard
           title="Bivariate relationship"
           subtitle={
@@ -295,10 +320,8 @@ export function ConceptDriftTab({ report }: ConceptDriftTabProps) {
           />
 
         </ChartCard>
-
+        )}
     </div>
-
   );
-
 }
 

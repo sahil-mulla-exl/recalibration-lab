@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -17,6 +17,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _to_numeric_array(series: pd.Series) -> np.ndarray:
@@ -160,26 +162,152 @@ def is_monotone(values: Sequence[float]) -> bool:
     return bool(np.all(diff >= 0) or np.all(diff <= 0))
 
 
-def compute_univariate_auc(series: pd.Series, target: pd.Series, seed: int = 42) -> float:
-    y = pd.to_numeric(target, errors="coerce").fillna(0).astype(int).to_numpy()
-    if len(np.unique(y)) < 2:
-        return 0.0
-    if pd.api.types.is_numeric_dtype(series):
-        x = pd.to_numeric(series, errors="coerce").fillna(0.0).to_numpy()
-        try:
-            return float(roc_auc_score(y, x))
-        except Exception:
-            return 0.0
+def _coerce_binary_target_array(target: pd.Series) -> np.ndarray:
+    numeric = pd.to_numeric(target, errors="coerce")
+    if numeric.notna().mean() >= 0.7:
+        return numeric.fillna(0.0).clip(lower=0.0, upper=1.0).round().astype(int).to_numpy()
 
-    x_cat = series.fillna("__NULL__").astype(str)
-    x_ohe = pd.get_dummies(x_cat, drop_first=False)
-    try:
-        clf = LogisticRegression(max_iter=300, random_state=seed, solver="lbfgs")
-        clf.fit(x_ohe, y)
-        proba = clf.predict_proba(x_ohe)[:, 1]
-        return float(roc_auc_score(y, proba))
-    except Exception:
-        return 0.0
+    text = target.astype(str).str.strip().str.lower()
+    positive_tokens = {"1", "true", "yes", "y", "event", "bad", "default", "positive"}
+    negative_tokens = {"0", "false", "no", "n", "non-event", "nonevent", "good", "negative"}
+    mapped = pd.Series(np.nan, index=target.index, dtype=float)
+    mapped[text.isin(positive_tokens)] = 1.0
+    mapped[text.isin(negative_tokens)] = 0.0
+    unresolved = mapped.isna()
+    if unresolved.any():
+        classes = [c for c in sorted(text[~text.isin({"", "nan", "none"})].unique().tolist()) if c]
+        if len(classes) >= 2:
+            positive_class = classes[-1]
+            mapped[unresolved] = (text[unresolved] == positive_class).astype(float)
+        else:
+            mapped[unresolved] = 0.0
+    return mapped.fillna(0.0).astype(int).to_numpy()
+
+
+def _variable_scores(series: pd.Series, categorical_encode: bool) -> np.ndarray:
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype(float).to_numpy()
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+    if categorical_encode:
+        codes, _ = pd.factorize(series.astype(str), sort=True)
+        return codes.astype(float)
+    as_num = pd.to_numeric(series, errors="coerce")
+    if as_num.notna().mean() >= 0.9:
+        return as_num.to_numpy(dtype=float)
+    codes, _ = pd.factorize(series.astype(str), sort=True)
+    return codes.astype(float)
+
+
+def compute_univariate_gini(
+    df: pd.DataFrame,
+    variable: str,
+    target: str,
+    min_events: int = 50,
+    categorical_encode: bool = False,
+    abs_gini: bool = False,
+) -> Dict[str, Any]:
+    """Compute univariate Gini (= 2×AUC − 1) for one variable in one dataset.
+
+    The variable's raw values are used directly as ranking scores (no model fit).
+    """
+    empty: Dict[str, Any] = {
+        "gini": None,
+        "auc": None,
+        "n": 0,
+        "n_events": 0,
+        "insufficient_events": True,
+    }
+    if variable not in df.columns or target not in df.columns:
+        logger.debug("Univariate Gini skipped: missing column %s or %s", variable, target)
+        return empty
+
+    frame = df[[variable, target]].dropna(subset=[variable, target])
+    if frame.empty:
+        return empty
+
+    y = _coerce_binary_target_array(frame[target])
+    scores = _variable_scores(frame[variable], categorical_encode)
+    valid = np.isfinite(scores)
+    if not valid.all():
+        y = y[valid]
+        scores = scores[valid]
+    if y.size == 0:
+        return empty
+
+    n_events = int(np.sum(y == 1))
+    n_non_events = int(np.sum(y == 0))
+    if n_events < min_events or n_non_events < min_events:
+        return {
+            "gini": None,
+            "auc": None,
+            "n": int(y.size),
+            "n_events": n_events,
+            "insufficient_events": True,
+        }
+
+    if len(np.unique(y)) < 2:
+        auc = 0.5
+    else:
+        try:
+            auc = float(roc_auc_score(y, scores))
+        except ValueError as exc:
+            logger.debug("Univariate Gini AUC failed for %s: %s", variable, exc)
+            auc = 0.5
+
+    gini = 2.0 * auc - 1.0
+    if abs_gini:
+        gini = abs(gini)
+
+    return {
+        "gini": float(gini),
+        "auc": float(auc),
+        "n": int(y.size),
+        "n_events": n_events,
+        "insufficient_events": False,
+    }
+
+
+def compute_univariate_gini_comparison(
+    dev_df: pd.DataFrame,
+    new_df: pd.DataFrame,
+    variables: Sequence[str],
+    dev_target: str,
+    new_target: str,
+    min_events: int = 50,
+    categorical_encode: bool = False,
+    abs_gini: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """Univariate Gini per model feature on dev validation and new data."""
+    results: Dict[str, Dict[str, Any]] = {}
+    kwargs = {
+        "min_events": min_events,
+        "categorical_encode": categorical_encode,
+        "abs_gini": abs_gini,
+    }
+    for variable in variables:
+        if variable not in dev_df.columns or variable not in new_df.columns:
+            continue
+        dev_res = compute_univariate_gini(dev_df, variable, dev_target, **kwargs)
+        new_res = compute_univariate_gini(new_df, variable, new_target, **kwargs)
+        dev_gini = dev_res.get("gini")
+        new_gini = new_res.get("gini")
+        delta: float | None = None
+        if dev_gini is not None and new_gini is not None:
+            delta = float(new_gini) - float(dev_gini)
+        results[variable] = {
+            "dev_gini": dev_gini,
+            "new_gini": new_gini,
+            "dev_auc": dev_res.get("auc"),
+            "new_auc": new_res.get("auc"),
+            "delta": delta,
+            "dev_n": dev_res.get("n"),
+            "new_n": new_res.get("n"),
+            "insufficient_events": bool(
+                dev_res.get("insufficient_events") or new_res.get("insufficient_events")
+            ),
+        }
+    return results
 
 
 def compute_bivariate_event_rate(
@@ -483,16 +611,20 @@ def compute_ks_curve_points(y_true: np.ndarray, y_score: np.ndarray, n: int = 60
     total_neg = max(float((frame["y"] == 0).sum()), 1.0)
     frame["cum_pos"] = (frame["y"] == 1).cumsum() / total_pos
     frame["cum_neg"] = (frame["y"] == 0).cumsum() / total_neg
-    frame["population_pct"] = (np.arange(len(frame)) + 1) / max(len(frame), 1)
+    n_rows = len(frame)
+    frame["population_pct"] = np.arange(n_rows) / max(n_rows - 1, 1)
     frame["ks"] = np.abs(frame["cum_pos"] - frame["cum_neg"])
-    idx = _downsample_indices(len(frame), n)
-    return [
-        {
-            "population_pct": float(frame.iloc[i]["population_pct"] * 100.0),
-            "cum_pos_pct": float(frame.iloc[i]["cum_pos"] * 100.0),
-            "cum_neg_pct": float(frame.iloc[i]["cum_neg"] * 100.0),
-            "ks": float(frame.iloc[i]["ks"]),
-        }
-        for i in idx
-    ]
+    idx = _downsample_indices(len(frame), max(n - 1, 1))
+    points = [{"population_pct": 0.0, "cum_pos_pct": 0.0, "cum_neg_pct": 0.0, "ks": 0.0}]
+    for i in idx:
+        row = frame.iloc[int(i)]
+        points.append(
+            {
+                "population_pct": float(row["population_pct"] * 100.0),
+                "cum_pos_pct": float(row["cum_pos"] * 100.0),
+                "cum_neg_pct": float(row["cum_neg"] * 100.0),
+                "ks": float(row["ks"]),
+            }
+        )
+    return points
 

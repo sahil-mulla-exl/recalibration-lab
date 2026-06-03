@@ -4,19 +4,19 @@ overview: Add native XGBoost variable-importance extraction to the evaluation ag
 todos:
   - id: backend-extractor
     content: Add get_xgboost_native_importance + comparison builder in model_helpers.py
-    status: pending
+    status: completed
   - id: evaluation-agent-payload
     content: Extend evaluation_agent task 3 to emit xgboost_importance (gain/weight/cover, full feature set)
-    status: pending
+    status: completed
   - id: backend-tests
     content: Add test_xgboost_importance.py unit tests
-    status: pending
+    status: completed
   - id: frontend-components
     content: Create EvaluationXgbImportance + single-series bar chart with type + Top/All controls
-    status: pending
+    status: completed
   - id: evaluation-page-wire
     content: Mount new section in Evaluation.tsx below legacy table when Feature Importance enabled
-    status: pending
+    status: completed
 isProject: false
 ---
 

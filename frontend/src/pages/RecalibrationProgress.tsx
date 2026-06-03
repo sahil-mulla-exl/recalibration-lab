@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "wouter";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, ArrowLeft, Zap, AlertTriangle, CheckCircle, GitBranch, Sliders, RotateCcw, Cpu } from "lucide-react";
+import { motion } from "framer-motion";
+import { ArrowRight, ArrowLeft, Zap, AlertTriangle, CheckCircle, GitBranch, Sliders, RotateCcw, Cpu, Download } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { DIAGNOSTIC_ACTION_MESSAGES, usesHyperparameterOptimization } from "@/config/diagnostics";
 import {
@@ -10,6 +10,7 @@ import {
   mergeDiagnosticsSearchSpace,
   type SearchSpaceValue,
 } from "@/config/recalibrationHp";
+import { downloadFeatureListXlsx } from "@/lib/download";
 import {
   configureRecalibration,
   normalizeOptimizationMethod,
@@ -20,6 +21,12 @@ import { usePersistedState, useSession } from "@/contexts/session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AgentStepper } from "@/components/AgentStepper";
+import { FeatureSelectionPanel } from "@/components/recalibration/FeatureSelectionPanel";
+import {
+  buildFeatureMetricsFromDrift,
+  featurePassesFilters,
+  type ScreenerFilter,
+} from "@/lib/featureScreener";
 import { ChartCard, ChartPlot } from "@/components/charts";
 import {
   axisLabel,
@@ -48,34 +55,6 @@ type OptimizationInput = {
   searchSpace?: SearchSpaceValue;
 };
 
-// Arc gauge component
-function ArcGauge({ value, max, color, size = 96 }: { value: number; max: number; color: string; size?: number }) {
-  const r = (size / 2) - 10;
-  const cx = size / 2, cy = size / 2;
-  const circumference = Math.PI * r;
-  const pct = Math.min(Math.max(value / max, 0), 1);
-  return (
-    <svg width={size} height={size / 2 + 14} viewBox={`0 0 ${size} ${size / 2 + 14}`}>
-      <path d={`M 10 ${cy} A ${r} ${r} 0 0 1 ${size - 10} ${cy}`} fill="none" stroke="#1e2a3a" strokeWidth={7} strokeLinecap="round" />
-      <path d={`M 10 ${cy} A ${r} ${r} 0 0 1 ${size - 10} ${cy}`} fill="none" stroke={color} strokeWidth={7} strokeLinecap="round"
-        strokeDasharray={circumference} strokeDashoffset={circumference * (1 - pct)} />
-      <text x={cx} y={cy + 10} textAnchor="middle" fill={color} fontSize={14} fontWeight="700" fontFamily="monospace">
-        {value.toFixed(4)}
-      </text>
-    </svg>
-  );
-}
-
-// CSI tier helpers
-const csiColor = (v: number) => v >= 0.25 ? "#f97316" : v >= 0.10 ? "#facc15" : "#34d399";
-const csiText = (v: number) => v >= 0.25 ? "text-orange-400" : v >= 0.10 ? "text-yellow-400" : "text-emerald-400";
-const csiBg = (v: number, dropped: boolean) =>
-  dropped
-    ? "bg-muted/10 border-border/30 opacity-40"
-    : v >= 0.25 ? "bg-orange-500/8 border-orange-500/25 hover:border-orange-500/50"
-    : v >= 0.10 ? "bg-yellow-500/8 border-yellow-500/20 hover:border-yellow-500/40"
-    : "bg-card border-border hover:border-primary/30";
-
 export default function RecalibrationProgress() {
   const theme = useChartTheme();
   const [, navigate] = useLocation();
@@ -102,12 +81,14 @@ export default function RecalibrationProgress() {
   const autoStartedRef = useRef(false);
   const needsHpConfig = usesHyperparameterOptimization(selectedAction);
   const showBestHyperparameters = needsHpConfig;
-  const showConfig = !running && !done;
   const problemType = String(selectedModel?.problem_type || "classification").toLowerCase().startsWith("reg")
     ? "regression"
     : "classification";
 
   const [drops, setDrops] = useState<string[]>([]);
+  const [screenerFilters, setScreenerFilters] = useState<ScreenerFilter[]>([]);
+  const [featuresConfirmed, setFeaturesConfirmed] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   // Model class is inherited from the model selected in inventory and cannot be changed during recalibration.
   const inheritedClass = (selectedModel?.model_class as string) || "XGBoost";
   const inventoryHpMethod = normalizeOptimizationMethod(selectedModel?.optimization_method);
@@ -115,7 +96,7 @@ export default function RecalibrationProgress() {
     MODEL_CLASSES.find((m) => m.id === inheritedClass) ??
     { id: inheritedClass, icon: <Cpu className="h-4 w-4" />, desc: "Inherited from model inventory" };
   const modelClass = inheritedClass;
-  const [hpMethod, setHpMethod] = useState<OptimizationMethod>(inventoryHpMethod);
+  const [hpMethod, setHpMethod] = useState<OptimizationMethod | "none">(inventoryHpMethod);
   const [cvFolds, setCvFolds] = useState(3);
 
   useEffect(() => {
@@ -172,6 +153,11 @@ export default function RecalibrationProgress() {
 
   const csiMap = (driftResult?.csi_results || {}) as Record<string, number>;
 
+  const metricsByFeature = useMemo(
+    () => buildFeatureMetricsFromDrift(driftResult as Record<string, unknown> | null, modelFeatures),
+    [driftResult, modelFeatures],
+  );
+
   const toggleDrop = (feat: string) =>
     setDrops((prev) => prev.includes(feat) ? prev.filter((f) => f !== feat) : [...prev, feat]);
 
@@ -219,20 +205,46 @@ export default function RecalibrationProgress() {
     const res = r as Record<string, unknown>;
     setResult(res);
     setRecalibrationResult(res);
+    setRunning(false);
     setDone(true);
   };
 
   const trials = result?.trial_history as Array<{ trial: number; score: number; auc?: number }> | undefined;
   const trialData = trials?.map((t) => ({ trial: t.trial, score: Number((t.score ?? t.auc ?? 0).toFixed(4)) })) || [];
   const bestScore = Number((result?.best_hp_score ?? result?.best_hp_auc ?? 0) as number);
-  const ootAuc = result?.oot_auc as number | undefined;
-  const ootRmse = result?.oot_rmse as number | undefined;
-  const ootR2 = result?.oot_r2 as number | undefined;
-  const aucImprovement = problemType === "classification" && driftResult && ootAuc ? ootAuc - Number(driftResult.new_auc) : undefined;
-  const rmseImprovement = problemType === "regression" && driftResult && ootRmse !== undefined
-    ? Number(driftResult.new_rmse ?? 0) - ootRmse
-    : undefined;
 
+  const finalFeatures = useMemo(() => {
+    const fromResult = (result?.features_used as string[]) || [];
+    if (fromResult.length > 0) return fromResult;
+    if (!modelFeatures.length) return [];
+    const dropSet = new Set(drops);
+    return modelFeatures.filter((f) => !dropSet.has(f));
+  }, [result?.features_used, modelFeatures, drops]);
+
+  const exportFinalFeatures = async () => {
+    if (finalFeatures.length === 0 || !sessionId) return;
+    try {
+      setExportBusy(true);
+      await downloadFeatureListXlsx(sessionId, finalFeatures, "final_feature_list.xlsx");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const confirmScreenerSelection = () => {
+    if (screenerFilters.length > 0) {
+      modelFeatures
+        .filter(
+          (f) =>
+            !drops.includes(f) &&
+            !featurePassesFilters(metricsByFeature[f], screenerFilters, "and"),
+        )
+        .forEach((f) => toggleDrop(f));
+    }
+    setFeaturesConfirmed(true);
+  };
   return (
     <div className="w-full max-w-none space-y-6 overflow-x-hidden">
       <div>
@@ -259,10 +271,7 @@ export default function RecalibrationProgress() {
         </Card>
       )}
 
-      {/* ── CONFIG PHASE ── */}
-      <AnimatePresence>
-        {showConfig && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="space-y-5">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
 
             {/* High-drift warning */}
             {highCsiVars.length > 0 && (
@@ -288,62 +297,46 @@ export default function RecalibrationProgress() {
 
             {/* Feature selection grid */}
             <Card className="p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-sm">Feature Selection</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">CSI scores shown — click to toggle drop</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-mono text-muted-foreground">
-                    <span className="text-foreground font-semibold">{modelFeatures.length - drops.length}</span> / {modelFeatures.length} retained
-                  </span>
-                  {drops.length > 0 && (
-                    <button onClick={() => setDrops([])} className="text-xs text-muted-foreground hover:text-foreground underline">Clear</button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                {modelFeatures.length === 0 && (
-                  <p className="text-sm text-muted-foreground col-span-2 py-4 text-center">
-                    No model features found. Upload a .pkl and complete data processing first.
+              <div>
+                <h2 className="font-semibold text-sm">Feature Selection</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Uncheck any features you want to exclude from the recalibrated model; CSI color shows drift severity.
+                </p>
+                {featuresConfirmed && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 font-medium">
+                    Screener selection confirmed — {modelFeatures.length - drops.length} features kept for recalibration.
                   </p>
                 )}
-                {modelFeatures.map((feat) => {
-                  const csi = csiMap[feat] || 0;
-                  const isDrop = drops.includes(feat);
-                  return (
-                    <button
-                      key={feat}
-                      onClick={() => toggleDrop(feat)}
-                      className={`relative flex items-center gap-2 px-3 py-2.5 rounded-lg border text-left transition-all ${csiBg(csi, isDrop)}`}
-                    >
-                      {/* CSI bar background */}
-                      {csi > 0 && !isDrop && (
-                        <div className="absolute left-0 top-0 bottom-0 rounded-l-lg" style={{
-                          width: `${Math.min(csi / 0.5, 1) * 100}%`,
-                          background: `${csiColor(csi)}0f`,
-                        }} />
-                      )}
-                      <div className="relative flex-1 flex items-center justify-between gap-2">
-                        <span className={`text-xs truncate ${isDrop ? "line-through text-muted-foreground/40" : "font-medium"}`}>{feat}</span>
-                        {csi > 0 && (
-                          <span className={`text-[10px] font-mono shrink-0 ${isDrop ? "text-muted-foreground/30" : csiText(csi)}`}>
-                            {csi.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                      {isDrop && (
-                        <span className="relative text-[9px] uppercase font-semibold text-destructive/60 shrink-0">drop</span>
-                      )}
-                    </button>
-                  );
-                })}
               </div>
+
+              <FeatureSelectionPanel
+                features={modelFeatures}
+                drops={drops}
+                csiMap={csiMap}
+                metricsByFeature={metricsByFeature}
+                screenerFilters={screenerFilters}
+                onScreenerFiltersChange={setScreenerFilters}
+                onConfirmScreener={confirmScreenerSelection}
+                onToggleDrop={toggleDrop}
+                onClearDrops={() => setDrops([])}
+              />
             </Card>
 
             <Card className="p-5 space-y-5">
-              <h2 className="font-semibold text-sm">Recalibration settings</h2>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <h2 className="font-semibold text-sm">Recalibration settings</h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs shrink-0"
+                  disabled={finalFeatures.length === 0 || exportBusy || !sessionId}
+                  onClick={() => void exportFinalFeatures()}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {exportBusy ? "Exporting…" : `Final Feature list (${finalFeatures.length})`}
+                </Button>
+              </div>
 
               {selectedAction === "recal_simple" && (
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-1">
@@ -489,6 +482,7 @@ export default function RecalibrationProgress() {
                 </div>
                 <Button
                   className="gap-2 shrink-0"
+                  disabled={running}
                   onClick={() =>
                     void startAgent({
                       drops,
@@ -499,86 +493,25 @@ export default function RecalibrationProgress() {
                   }
                 >
                   <Zap className="h-4 w-4" />
-                  Start recalibration
+                  {running ? "Recalibrating…" : "Start recalibration"}
                 </Button>
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* ── RUNNING PHASE ── */}
-      {running && !done && sessionId && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        {running && !done && sessionId && (
           <Card className="p-5">
             <h2 className="font-semibold text-sm mb-4">Recalibration Agent</h2>
             <AgentStepper sessionId={sessionId} agent="recalibration" onCompleted={handleCompleted} />
           </Card>
-        </motion.div>
-      )}
+        )}
 
-      {/* ── DONE PHASE ── */}
-      {done && result && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-
-          {/* Hero KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-primary/25 bg-gradient-to-b from-primary/10 to-transparent p-5 text-center">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                Best HP {problemType === "regression" ? "R2" : "AUC"}
-              </p>
-              <ArcGauge value={bestScore} max={1} color="#FB4E0B" size={96} />
-              <p className="text-xs text-muted-foreground mt-1">CV best trial</p>
-            </div>
-            <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-transparent p-5 text-center">
-              {problemType === "regression" ? (
-                <>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">OOT R2</p>
-                  <ArcGauge value={ootR2 ?? 0} max={1} color="#34d399" size={96} />
-                  <p className="text-xs text-muted-foreground mt-1">Out-of-time holdout</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">OOT AUC</p>
-                  <ArcGauge value={ootAuc ?? 0} max={1} color="#34d399" size={96} />
-                  <p className="text-xs text-muted-foreground mt-1">Out-of-time holdout</p>
-                </>
-              )}
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-5 flex flex-col justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Summary</p>
-                <div className="space-y-2.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Features used</span>
-                    <span className="font-mono font-semibold">{String(result.n_features ?? modelFeatures.length - drops.length)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">HP trials</span>
-                    <span className="font-mono font-semibold">{trialData.length || "30"}</span>
-                  </div>
-                  {aucImprovement !== undefined && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">vs. degraded AUC</span>
-                      <span className={`font-mono font-semibold ${aucImprovement > 0 ? "text-emerald-400" : "text-orange-400"}`}>
-                        {aucImprovement > 0 ? "+" : ""}{(aucImprovement * 100).toFixed(2)} pp
-                      </span>
-                    </div>
-                  )}
-                  {rmseImprovement !== undefined && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">RMSE improvement</span>
-                      <span className={`font-mono font-semibold ${rmseImprovement > 0 ? "text-emerald-400" : "text-orange-400"}`}>
-                        {rmseImprovement > 0 ? "+" : ""}{rmseImprovement.toFixed(4)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mt-3 text-emerald-400 text-xs font-medium">
-                <CheckCircle className="h-3.5 w-3.5" />Model saved to session
-              </div>
-            </div>
+        {done && result && (
+          <div className="space-y-5 border-t border-border/60 pt-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-semibold text-sm">Recalibration results</h2>
+            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+              <CheckCircle className="h-3.5 w-3.5" /> Model saved to session
+            </span>
           </div>
 
           {/* Model / HP params */}
@@ -644,9 +577,9 @@ export default function RecalibrationProgress() {
                       type="monotone"
                       dataKey="score"
                       stroke={theme.series.new}
-                      strokeWidth={1.5}
+                      strokeWidth={theme.plot.lineStrokeWidth}
                       fill={theme.series.newFill}
-                      fillOpacity={0.25}
+                      fillOpacity={theme.plot.areaFillOpacity}
                       dot={false}
                     />
                   </AreaChart>
@@ -658,7 +591,6 @@ export default function RecalibrationProgress() {
           <div className="flex justify-end">
             <Button
               onClick={() => {
-                // Explicit proceed click should always trigger a fresh evaluation run.
                 setEvaluationResult(null);
                 setStep(5);
                 navigate("/evaluation");
@@ -668,8 +600,10 @@ export default function RecalibrationProgress() {
               Proceed to Evaluation <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
-        </motion.div>
-      )}
+          </div>
+        )}
+
+      </motion.div>
     </div>
   );
 }

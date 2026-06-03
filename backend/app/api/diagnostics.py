@@ -341,12 +341,12 @@ def _build_diagnostics_excel_bytes(result: Dict[str, Any], tab_key: str) -> io.B
         elif tab_key == "concept":
             concept = result.get("concept_drift", {})
             iv = concept.get("iv", {}) or {}
-            uni_auc = concept.get("univariate_auc", {}) or {}
+            uni_gini = concept.get("univariate_gini", {}) or concept.get("univariate_auc", {}) or {}
             bivariate = concept.get("bivariate_monotonicity", {}) or {}
             iv_rows = [{"feature": f, **(vals or {})} for f, vals in iv.items()]
-            auc_rows = [{"feature": f, **(vals or {})} for f, vals in uni_auc.items()]
+            gini_rows = [{"feature": f, **(vals or {})} for f, vals in uni_gini.items()]
             iv_sheet = _write_df(writer, used_sheet_names, "IV", iv_rows)
-            auc_sheet = _write_df(writer, used_sheet_names, "Univariate_AUC", auc_rows)
+            gini_sheet = _write_df(writer, used_sheet_names, "Univariate_Gini", gini_rows)
 
             monotonicity_rows = []
             for feature, vals in bivariate.items():
@@ -368,8 +368,8 @@ def _build_diagnostics_excel_bytes(result: Dict[str, Any], tab_key: str) -> io.B
                 "Chart_IV", "Information Value (Train vs New)", category_col=1, data_min_col=2, data_max_col=3
             )
             _add_bar_chart(
-                wb, used_sheet_names, auc_sheet,
-                "Chart_Univariate_AUC", "Univariate AUC (Train vs New)", category_col=1, data_min_col=2, data_max_col=3
+                wb, used_sheet_names, gini_sheet,
+                "Chart_Univariate_Gini", "Univariate Gini (Dev Validation vs New)", category_col=1, data_min_col=2, data_max_col=3
             )
             top_iv = sorted(iv_rows, key=lambda r: abs(_to_float(r.get("delta"))), reverse=True)[:15]
             if top_iv:
@@ -385,16 +385,38 @@ def _build_diagnostics_excel_bytes(result: Dict[str, Any], tab_key: str) -> io.B
                         ax.grid(axis="x", alpha=0.25),
                     ),
                 )
-            top_auc = sorted(auc_rows, key=lambda r: abs(_to_float(r.get("new_auc")) - _to_float(r.get("train_auc"))), reverse=True)[:15]
-            if top_auc:
+            def _gini_val(row: Dict[str, Any], key: str, auc_key: str) -> float:
+                if row.get(key) is not None:
+                    return _to_float(row.get(key))
+                if row.get(auc_key) is not None:
+                    return 2.0 * _to_float(row.get(auc_key)) - 1.0
+                return 0.0
+
+            top_gini = sorted(
+                gini_rows,
+                key=lambda r: abs(_gini_val(r, "new_gini", "new_auc") - _gini_val(r, "dev_gini", "train_auc")),
+                reverse=True,
+            )[:15]
+            if top_gini:
                 _add_chart_image(
                     wb,
                     used_sheet_names,
-                    "ChartImg_Univariate_AUC",
+                    "ChartImg_Univariate_Gini",
                     lambda ax, _plt: (
-                        ax.barh([r["feature"] for r in top_auc], [_to_float(r.get("train_auc")) for r in top_auc], color="#9CA3AF", label="Train"),
-                        ax.barh([r["feature"] for r in top_auc], [_to_float(r.get("new_auc")) for r in top_auc], color="#FB4E0B", alpha=0.7, label="New"),
-                        ax.set_title("Univariate AUC"),
+                        ax.barh(
+                            [r["feature"] for r in top_gini],
+                            [_gini_val(r, "dev_gini", "dev_auc") or _gini_val(r, "dev_gini", "train_auc") for r in top_gini],
+                            color="#9CA3AF",
+                            label="Dev validation",
+                        ),
+                        ax.barh(
+                            [r["feature"] for r in top_gini],
+                            [_gini_val(r, "new_gini", "new_auc") for r in top_gini],
+                            color="#FB4E0B",
+                            alpha=0.7,
+                            label="New",
+                        ),
+                        ax.set_title("Univariate Gini"),
                         ax.legend(),
                         ax.grid(axis="x", alpha=0.25),
                     ),

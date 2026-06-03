@@ -305,7 +305,7 @@ export function EvaluationRankOrderBreak({ report, theme, cohortColors }: Evalua
                       formatter={(v: number) => [`${Number(v).toFixed(2)}%`, "Event rate"]}
                       {...chartTooltipProps(theme)}
                     />
-                    <Bar dataKey="eventRatePct" radius={[4, 4, 0, 0]} legendType="none">
+                    <Bar dataKey="eventRatePct" radius={[4, 4, 0, 0]} legendType="none" strokeWidth={theme.plot.barStrokeWidth}>
                       {eventRateChartData.map((e, i) => (
                         <Cell
                           key={i}
@@ -318,7 +318,7 @@ export function EvaluationRankOrderBreak({ report, theme, cohortColors }: Evalua
                       type="monotone"
                       dataKey="eventRatePct"
                       stroke={theme.series.trend}
-                      strokeWidth={2}
+                      strokeWidth={theme.plot.lineStrokeWidth}
                       dot={{ r: 3, fill: theme.series.trend }}
                       legendType="none"
                     />

@@ -9,18 +9,30 @@ from backend.app.utils.session import get_session, update_session, session_dir
 from backend.app.utils.model_features import resolve_session_model_features
 from backend.app.utils.model_helpers import (
     TARGET_COL,
+    build_xgboost_importance_comparison,
+    get_xgboost_native_importance,
     score_dataframe,
     resolve_estimator,
 )
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.oot_data import load_oot_dataframe, load_oos_evaluation_dataframe
 from backend.app.utils.diagnostics_metrics import (
+    compute_aucpr_logloss_brier,
     compute_ks_curve_points,
     compute_rank_order_analysis,
 )
 from backend.app.utils.drift_metrics import (
     compute_auc, compute_ks_stat, compute_gini, compute_lift_by_decile, compute_calibration_by_decile,
     compute_rmse, compute_mae, compute_r2,
+)
+from backend.app.utils.inventory_metrics import (
+    require_performance_metrics,
+    wants_feature_importance,
+)
+from backend.app.core.governance import load_governance
+from backend.app.utils.interpretability import (
+    compute_shap_importance,
+    compute_shap_shift_flags,
 )
 from backend.app.config.datasets import HOLD_DATA, NEW_VALIDATION
 from backend.app.config.agent_task_labels import EVAL_SCORE_HOLDOUTS
@@ -33,7 +45,7 @@ class EvaluationAgent(Agent):
             {"id": "score_oot_with_original",     "name": EVAL_SCORE_HOLDOUTS},
             {"id": "compute_performance_metrics", "name": "Compute performance metrics (AUC, KS, lift)"},
             {"id": "compute_variable_experience", "name": "Compute variable importance comparison"},
-            {"id": "compute_score_migration",     "name": "Compute 10×10 score migration matrix"},
+            {"id": "compute_score_migration",     "name": "Score decile migration (champion vs recalibrated)"},
             {"id": "compute_top_decile_overlap",  "name": "Compute top-decile customer overlap (Jaccard)"},
             {"id": "assemble_export_artifacts",   "name": "Assemble export artifacts"},
         ])
@@ -45,6 +57,15 @@ class EvaluationAgent(Agent):
             return {}
 
         await self.started()
+
+        try:
+            selected_performance_metrics = require_performance_metrics(session)
+        except ValueError as exc:
+            await self.failed(str(exc))
+            return {}
+        await self.log(
+            "Inventory performance metrics: " + ", ".join(selected_performance_metrics)
+        )
         model_entry = session.get("model_entry") or {}
         problem_type = str(model_entry.get("problem_type") or "classification").lower()
         is_regression = problem_type.startswith("reg")
@@ -231,37 +252,135 @@ class EvaluationAgent(Agent):
         # ── Task 3: Variable importance ───────────────────────────────────
         await self.task_started("compute_variable_experience")
         await asyncio.sleep(0.7)
-        orig_imp = {}
-        new_imp = {}
-
-        def _get_importance(model, cols):
-            if hasattr(model, 'feature_importances_'):
-                feature_names = list(model.feature_names_in_) if hasattr(model, 'feature_names_in_') else cols
-                return dict(zip(feature_names, model.feature_importances_.tolist()))
-            return {}
-
+        importance_table: List[Dict[str, Any]] = []
         feature_cols = resolve_session_model_features(session)
-        orig_imp = _get_importance(orig_model, feature_cols)
-        new_imp = _get_importance(new_model, feature_cols)
 
-        # Sort by new importance (use .pkl feature names as-is)
-        sorted_features = sorted(feature_cols, key=lambda k: new_imp.get(k, 0), reverse=True)
-        importance_table = []
-        for feat in sorted_features[:18]:
-            orig_v = orig_imp.get(feat, 0)
-            new_v = new_imp.get(feat, 0)
-            sign_stable = (orig_v > 0 and new_v > 0) or (orig_v == 0 and new_v == 0)
-            importance_table.append({
-                "feature": feat,
-                "orig_importance": round(orig_v, 6),
-                "new_importance": round(new_v, 6),
-                "delta": round(new_v - orig_v, 6),
-                "sign_stable": sign_stable,
-            })
+        champion_gain = get_xgboost_native_importance(orig_model, feature_cols, "gain")
+        recal_gain = get_xgboost_native_importance(new_model, feature_cols, "gain")
+        comparison_gain = build_xgboost_importance_comparison(
+            champion_gain,
+            recal_gain,
+            feature_cols,
+        )
+        if comparison_gain:
+            top_champion = [r["feature"] for r in comparison_gain[:3]]
+            top_recal = [
+                r["feature"]
+                for r in sorted(
+                    comparison_gain,
+                    key=lambda r: float(r["recal_importance"]),
+                    reverse=True,
+                )[:3]
+            ]
+            await self.log(
+                f"XGBoost gain top-3 champion: {top_champion} | recalibrated: {top_recal}"
+            )
+        xgboost_importance: Dict[str, Any] = {
+            "available": bool(champion_gain or recal_gain),
+            "importance_type": "gain",
+            "champion": champion_gain,
+            "recalibrated": recal_gain,
+            "comparison": comparison_gain,
+        }
 
-        await self.log(f"Top-3 orig features: {[r['feature'] for r in sorted(importance_table, key=lambda x: -x['orig_importance'])[:3]]}")
-        await self.log(f"Top-3 new features: {[r['feature'] for r in sorted(importance_table, key=lambda x: -x['new_importance'])[:3]]}")
-        await self.task_completed("compute_variable_experience", f"{len(importance_table)} feature importances compared")
+        shap_cols = [c for c in feature_cols if c in oos_df.columns]
+        shap_frame = oos_df[shap_cols].copy() if shap_cols else pd.DataFrame()
+        for col in shap_frame.columns:
+            shap_frame[col] = pd.to_numeric(shap_frame[col], errors="coerce").fillna(0.0)
+
+        def _compute_evaluation_shap() -> tuple[Dict[str, float], Dict[str, float]]:
+            if shap_frame.empty:
+                return {}, {}
+            return (
+                compute_shap_importance(orig_model, shap_frame),
+                compute_shap_importance(new_model, shap_frame),
+            )
+
+        champion_shap, recal_shap = await asyncio.to_thread(_compute_evaluation_shap)
+        comparison_shap = build_xgboost_importance_comparison(
+            champion_shap,
+            recal_shap,
+            feature_cols,
+        )
+        shap_flags: Dict[str, Any] = {}
+        if champion_shap and recal_shap:
+            gov = load_governance(session)
+            shap_gov = gov.get("shap") or {}
+            shap_flags = compute_shap_shift_flags(
+                champion_shap,
+                recal_shap,
+                top_k=10,
+                jaccard_min=float(shap_gov.get("jaccard_min", 0.80)),
+                rank_shift_min_positions=int(shap_gov.get("rank_shift_min_positions", 3)),
+                mass_drop_pp=float(shap_gov.get("mass_drop_pp", 5.0)),
+            )
+        shap_importance: Dict[str, Any] = {
+            "available": bool(champion_shap or recal_shap),
+            "champion": champion_shap,
+            "recalibrated": recal_shap,
+            "comparison": comparison_shap,
+            "shap_flags": shap_flags,
+        }
+        if comparison_shap:
+            await self.log(
+                "SHAP top-3 production: "
+                f"{[r['feature'] for r in comparison_shap[:3]]} | recalibrated: "
+                f"{[r['feature'] for r in sorted(comparison_shap, key=lambda r: float(r['recal_importance']), reverse=True)[:3]]}"
+            )
+
+        if wants_feature_importance(session):
+            def _get_importance(model, cols):
+                if hasattr(model, 'feature_importances_'):
+                    feature_names = list(model.feature_names_in_) if hasattr(model, 'feature_names_in_') else cols
+                    return dict(zip(feature_names, model.feature_importances_.tolist()))
+                return {}
+
+            orig_imp = _get_importance(orig_model, feature_cols)
+            new_imp = _get_importance(new_model, feature_cols)
+
+            sorted_features = sorted(feature_cols, key=lambda k: new_imp.get(k, 0), reverse=True)
+            for feat in sorted_features[:18]:
+                orig_v = orig_imp.get(feat, 0)
+                new_v = new_imp.get(feat, 0)
+                sign_stable = (orig_v > 0 and new_v > 0) or (orig_v == 0 and new_v == 0)
+                importance_table.append({
+                    "feature": feat,
+                    "orig_importance": round(orig_v, 6),
+                    "new_importance": round(new_v, 6),
+                    "delta": round(new_v - orig_v, 6),
+                    "sign_stable": sign_stable,
+                })
+
+            await self.log(f"Top-3 orig features: {[r['feature'] for r in sorted(importance_table, key=lambda x: -x['orig_importance'])[:3]]}")
+            await self.log(f"Top-3 new features: {[r['feature'] for r in sorted(importance_table, key=lambda x: -x['new_importance'])[:3]]}")
+            msg = f"{len(importance_table)} feature importances compared"
+            if xgboost_importance["available"]:
+                msg += " · XGBoost native gain"
+            if shap_importance["available"]:
+                msg += " · SHAP (prod vs recal)"
+            await self.task_completed("compute_variable_experience", msg)
+        else:
+            if xgboost_importance["available"] or shap_importance["available"]:
+                extras = []
+                if xgboost_importance["available"]:
+                    extras.append("XGBoost native gain")
+                if shap_importance["available"]:
+                    extras.append("SHAP prod vs recal")
+                await self.log(
+                    "Sklearn importance table skipped (inventory); " + " · ".join(extras)
+                )
+                await self.task_completed(
+                    "compute_variable_experience",
+                    " · ".join(extras) if extras else "Skipped",
+                )
+            else:
+                await self.log(
+                    "Feature Importance not in inventory; no XGBoost booster on champion model"
+                )
+                await self.task_completed(
+                    "compute_variable_experience",
+                    "Skipped (not in inventory configuration)",
+                )
 
         await asyncio.sleep(0.5)
 
@@ -272,7 +391,7 @@ class EvaluationAgent(Agent):
             migration_matrix = np.zeros((0, 0), dtype=int)
             migration_pct = np.zeros((0, 0), dtype=float)
             diagonal_pct = 0.0
-            await self.log("Score migration skipped for regression workflows")
+            await self.log("Score decile migration skipped for regression workflows")
             await self.task_completed("compute_score_migration", "Skipped (not applicable for regression)")
         else:
             orig_deciles = pd.qcut(pd.Series(champion_oos_scores).rank(method="first"), q=10, labels=False).values + 1
@@ -284,12 +403,17 @@ class EvaluationAgent(Agent):
 
             # Normalize rows
             migration_pct = (migration_matrix / migration_matrix.sum(axis=1, keepdims=True) * 100).round(1)
-            await self.log(f"Migration matrix computed — {len(champion_oos_scores):,} customers on new holdout")
+            await self.log(
+                f"Decile migration matrix computed — {len(champion_oos_scores):,} accounts on {NEW_VALIDATION}"
+            )
             diagonal_pct = np.diag(migration_pct).mean()
-            await self.log(f"Average diagonal (same decile): {diagonal_pct:.1f}%")
+            await self.log(f"Same decile (diagonal avg): {diagonal_pct:.1f}%")
             adjacent_pct = np.mean([migration_pct[i, max(0,i-1):i+2].sum() - migration_pct[i,i] for i in range(10)])
-            await self.log(f"Average adjacent movement: {adjacent_pct:.1f}%")
-            await self.task_completed("compute_score_migration", f"10×10 matrix | avg diagonal {diagonal_pct:.1f}%")
+            await self.log(f"Adjacent decile movement (avg): {adjacent_pct:.1f}%")
+            await self.task_completed(
+                "compute_score_migration",
+                f"Decile migration · {diagonal_pct:.1f}% stayed in same decile (avg)",
+            )
 
         await asyncio.sleep(0.4)
 
@@ -365,6 +489,8 @@ class EvaluationAgent(Agent):
 
         result = {
             "problem_type": problem_type,
+            "selected_metrics": selected_performance_metrics,
+            "inventory_metrics": sorted(list(session.get("evaluation_metrics") or session.get("drift_metrics") or [])),
             "evaluation_cohorts": {
                 "champion_hold": _cohort_payload(hold_metrics, hold_source, len(hold_df)),
                 "champion_oos": _cohort_payload(champion_oos_metrics, oos_source, len(oos_df)),
@@ -374,6 +500,12 @@ class EvaluationAgent(Agent):
             "oos_source": oos_source,
             "orig_auc": round(orig_auc, 4),
             "new_auc": round(new_auc, 4),
+            "orig_auc_pr": round(float(champion_oos_metrics.get("auc_pr") or 0.0), 4)
+            if not is_regression
+            else None,
+            "new_auc_pr": round(float(recal_oos_metrics.get("auc_pr") or 0.0), 4)
+            if not is_regression
+            else None,
             "auc_delta_pp": round(auc_delta, 2),
             "orig_ks": round(orig_ks, 4),
             "new_ks": round(new_ks, 4),
@@ -386,6 +518,9 @@ class EvaluationAgent(Agent):
             "orig_r2": round(orig_r2, 6) if is_regression else None,
             "new_r2": round(new_r2, 6) if is_regression else None,
             "champion_hold_auc": round(hold_metrics["auc"], 4) if not is_regression else None,
+            "champion_hold_auc_pr": round(float(hold_metrics.get("auc_pr") or 0.0), 4)
+            if not is_regression
+            else None,
             "champion_hold_ks": round(hold_metrics["ks"], 4) if not is_regression else None,
             "champion_hold_gini": round(hold_metrics["gini"], 4) if not is_regression else None,
             "champion_hold_rmse": round(hold_metrics["rmse"], 6) if is_regression else None,
@@ -417,6 +552,8 @@ class EvaluationAgent(Agent):
             "migration_matrix": migration_matrix.tolist(),
             "migration_pct": migration_pct.tolist(),
             "importance_table": importance_table,
+            "xgboost_importance": xgboost_importance,
+            "shap_importance": shap_importance,
             "orig_lift_table": orig_lift,
             "new_lift_table": new_lift,
             "champion_hold_lift_table": hold_metrics["lift_table"],
@@ -477,6 +614,7 @@ def _compute_cohort_metrics(y_true: np.ndarray, y_score: np.ndarray, is_regressi
             "cal_error": 0.0,
             "roc": {"fpr": [], "tpr": []},
             "ks_curve": [],
+            "auc_pr": 0.0,
             "decile_rates": [],
             "rank_order_deciles": [],
             "rank_order_break": {
@@ -487,10 +625,12 @@ def _compute_cohort_metrics(y_true: np.ndarray, y_score: np.ndarray, is_regressi
             },
         }
     auc = compute_auc(y_true, y_score)
+    aux = compute_aucpr_logloss_brier(y_true, y_score)
     cal = compute_calibration_by_decile(y_true, y_score)
     rob_payload = compute_rank_order_analysis(y_true, y_score)
     return {
         "auc": auc,
+        "auc_pr": float(aux.get("auc_pr") or 0.0),
         "ks": compute_ks_stat(y_true, y_score),
         "gini": compute_gini(auc),
         "rmse": 0.0,
@@ -513,6 +653,7 @@ def _cohort_payload(metrics: Dict[str, Any], source: str, rows: int) -> Dict[str
         "source": source,
         "rows": int(rows),
         "auc": round(float(metrics.get("auc") or 0.0), 4),
+        "auc_pr": round(float(metrics.get("auc_pr") or 0.0), 4),
         "ks": round(float(metrics.get("ks") or 0.0), 4),
         "gini": round(float(metrics.get("gini") or 0.0), 4),
         "rmse": round(float(metrics.get("rmse") or 0.0), 6),

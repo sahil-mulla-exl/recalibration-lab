@@ -27,7 +27,7 @@ from backend.app.utils.diagnostics_metrics import (
     compute_rob_monotonicity,
     compute_roc_curve_points,
     compute_score_psi_frozen_deciles,
-    compute_univariate_auc,
+    compute_univariate_gini_comparison,
     compute_woe_iv_with_frozen_bins,
     find_optimal_thresholds,
 )
@@ -217,11 +217,11 @@ class DriftDiagnosticsAgent(Agent):
         await self._emit_progress()
 
         await self.task_started("compute_concept_drift")
-        await self.log("Computing IV, univariate AUC, and bivariate relationships from model features…")
+        await self.log("Computing IV, univariate Gini, and bivariate relationships from model features…")
         concept_drift = await asyncio.to_thread(self._run_concept_drift, ctx)
         await self.task_completed(
             "compute_concept_drift",
-            f"IV/AUC on {len(concept_drift.get('iv', {}))} features · "
+            f"IV/Gini on {len(concept_drift.get('iv', {}))} features · "
             f"bivariate on {len(concept_drift.get('bivariate_monotonicity', {}))} features",
         )
         await self._emit_progress()
@@ -507,7 +507,6 @@ class DriftDiagnosticsAgent(Agent):
 
     def _run_concept_drift(self, ctx: DiagnosticsContext) -> Dict[str, Any]:
         iv_by_feature: Dict[str, Any] = {}
-        auc_uni: Dict[str, Any] = {}
         bivariate: Dict[str, Any] = {}
         y_train = self._coerce_binary_target(ctx.train_df[ctx.train_target_col]).astype(int)
         y_new = self._coerce_binary_target(ctx.new_df[ctx.new_target_col]).astype(int)
@@ -526,16 +525,21 @@ class DriftDiagnosticsAgent(Agent):
                 "mono_train": bool(iv["mono_train"]),
                 "mono_new": bool(iv["mono_new"]),
             }
-            auc_uni[col] = {
-                "train_auc": compute_univariate_auc(ctx.train_df[col], y_train),
-                "new_auc": compute_univariate_auc(ctx.new_df[col], y_new),
-            }
             bivariate[col] = compute_bivariate_event_rate(
                 ctx.train_df[col], y_train, ctx.new_df[col], y_new, n_bins=10
             )
+
+        gini_uni = compute_univariate_gini_comparison(
+            ctx.dev_oos_df,
+            ctx.new_df,
+            ctx.feature_cols,
+            ctx.dev_target_col,
+            ctx.new_target_col,
+        )
+
         return {
             "iv": iv_by_feature,
-            "univariate_auc": auc_uni,
+            "univariate_gini": gini_uni,
             "bivariate_monotonicity": bivariate,
         }
 
@@ -585,6 +589,14 @@ class DriftDiagnosticsAgent(Agent):
                 "new": compute_classification_metrics(new_y, new_scores, f1_threshold),
             },
         }
+        threshold_grid: Dict[str, Any] = {}
+        for step in range(5, 100, 5):
+            t = round(step / 100.0, 2)
+            threshold_grid[f"{t:.2f}"] = {
+                "threshold": t,
+                "dev": compute_classification_metrics(dev_y, dev_scores, t),
+                "new": compute_classification_metrics(new_y, new_scores, t),
+            }
         dev_lift = compute_lift_by_decile(dev_y, dev_scores)
         new_lift = compute_lift_by_decile(new_y, new_scores)
         dev_rates = compute_decile_event_rates(dev_y, dev_scores)
@@ -610,6 +622,7 @@ class DriftDiagnosticsAgent(Agent):
             "thresholds": thresholds,
             "classification_threshold": base_threshold,
             "classification_by_threshold": classification_by_threshold,
+            "classification_threshold_grid": threshold_grid,
             "classification_dev": clf_dev,
             "classification_new": clf_new,
             "dev_lift_table": dev_lift,

@@ -53,8 +53,16 @@ export const uploadInventory = async (file: File) => {
 };
 
 // ── Workflow ──────────────────────────────────────────────────────────────────
-export const selectModel = (session_id: string, model_id: string, model_entry: ModelEntry) =>
-  apiFetch("/workflow/select-model", { method: "POST", body: JSON.stringify({ session_id, model_id, model_entry }) });
+export const selectModel = (
+  session_id: string,
+  model_id: string,
+  model_entry: ModelEntry,
+  inventory_metrics?: string[],
+) =>
+  apiFetch("/workflow/select-model", {
+    method: "POST",
+    body: JSON.stringify({ session_id, model_id, model_entry, inventory_metrics }),
+  });
 
 export const clearModelWorkflowState = (session_id: string) =>
   apiFetch("/workflow/clear-model", { method: "POST", body: JSON.stringify({ session_id }) });
