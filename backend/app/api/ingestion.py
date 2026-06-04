@@ -2,6 +2,7 @@ import os
 import shutil
 from fastapi import APIRouter, UploadFile, File, Form
 import pandas as pd
+from backend.app.config.datasets import DEV_DATA
 from backend.app.utils.session import get_session, update_session, session_dir
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.model_helpers import extract_model_metadata
@@ -358,15 +359,15 @@ async def configure_variables(body: dict):
         return {"error": "Session not found"}
     dev_path = session.get("dev_data_path")
     if not dev_path or not os.path.exists(dev_path):
-        return {"error": "Upload Development Data before selecting variables"}
+        return {"error": f"Upload {DEV_DATA} before selecting variables"}
 
     dev_df = _read_dataframe(dev_path)
     if dev_df is None:
-        return {"error": "Unable to read Development Data"}
+        return {"error": f"Unable to read {DEV_DATA}"}
     if target_variable not in dev_df.columns:
-        return {"error": f"Target variable '{target_variable}' not found in Development Data"}
+        return {"error": f"Target variable '{target_variable}' not found in {DEV_DATA}"}
     if outcome_variable not in dev_df.columns:
-        return {"error": f"Outcome variable '{outcome_variable}' not found in Development Data"}
+        return {"error": f"Outcome variable '{outcome_variable}' not found in {DEV_DATA}"}
 
     update_session(
         session_id,

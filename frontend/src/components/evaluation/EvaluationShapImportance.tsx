@@ -142,13 +142,13 @@ export function EvaluationShapImportance({ payload }: EvaluationShapImportancePr
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-xl border border-border p-3">
               <p className="text-xs font-semibold text-muted-foreground mb-2">
-                Production model ({EVALUATION_SERIES.championOos})
+                Existing Model ({EVALUATION_SERIES.championOos})
               </p>
               <XgbSingleImportanceChart
                 rows={championRows}
                 color={theme.series.train}
                 fill={theme.series.trainFill}
-                title={`Production · ${EVALUATION_SERIES.championOos}`}
+                title={`Existing Model · ${EVALUATION_SERIES.championOos}`}
               />
             </div>
             <div className="rounded-xl border border-border p-3">

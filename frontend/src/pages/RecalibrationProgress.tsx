@@ -10,7 +10,7 @@ import {
   mergeDiagnosticsSearchSpace,
   type SearchSpaceValue,
 } from "@/config/recalibrationHp";
-import { downloadFeatureListXlsx } from "@/lib/download";
+import { downloadFeatureListXlsx, downloadRecalibrationTrainingData } from "@/lib/download";
 import {
   configureRecalibration,
   normalizeOptimizationMethod,
@@ -233,6 +233,18 @@ export default function RecalibrationProgress() {
     }
   };
 
+  const exportRecalibrationDataset = async () => {
+    if (!sessionId) return;
+    try {
+      setExportBusy(true);
+      await downloadRecalibrationTrainingData(sessionId);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   const confirmScreenerSelection = () => {
     if (screenerFilters.length > 0) {
       modelFeatures
@@ -325,17 +337,35 @@ export default function RecalibrationProgress() {
             <Card className="p-5 space-y-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <h2 className="font-semibold text-sm">Recalibration settings</h2>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs shrink-0"
-                  disabled={finalFeatures.length === 0 || exportBusy || !sessionId}
-                  onClick={() => void exportFinalFeatures()}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  {exportBusy ? "Exporting…" : `Final Feature list (${finalFeatures.length})`}
-                </Button>
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={exportBusy || !sessionId || !done}
+                    title={
+                      done
+                        ? "Download combined Existing Train + New Train used for recalibration (includes new_score after run)"
+                        : "Run recalibration first to build the cached training dataset"
+                    }
+                    onClick={() => void exportRecalibrationDataset()}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {exportBusy ? "Exporting…" : "Final recalibration dataset"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={finalFeatures.length === 0 || exportBusy || !sessionId}
+                    onClick={() => void exportFinalFeatures()}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {exportBusy ? "Exporting…" : `Final Feature list (${finalFeatures.length})`}
+                  </Button>
+                </div>
               </div>
 
               {selectedAction === "recal_simple" && (

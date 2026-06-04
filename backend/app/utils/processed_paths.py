@@ -7,13 +7,14 @@ from typing import Any, Dict, Literal, Optional
 import numpy as np
 import pandas as pd
 
-DatasetKind = Literal["dev", "new", "hold", "oot"]
+DatasetKind = Literal["dev", "new", "hold", "oot", "recal_train"]
 
 _DATASET_BASENAME = {
     "dev": "processed_dev",
     "new": "processed_new",
     "hold": "processed_hold",
     "oot": "processed_oot",
+    "recal_train": "recalibration_training",
 }
 
 
@@ -68,6 +69,14 @@ def _write_parquet_safe(df: pd.DataFrame, path: str) -> None:
         for col in safe.select_dtypes(include=["object"]).columns:
             safe[col] = safe[col].astype(str)
         safe.to_parquet(path, index=False)
+
+
+def persist_recalibration_training_parquet(df: pd.DataFrame, session_id: str) -> str:
+    """Fast parquet-only write for the combined recalibration training frame."""
+    processed_data_dir()
+    parquet_path = processed_parquet_path(session_id, "recal_train")
+    _write_parquet_safe(df, parquet_path)
+    return parquet_path
 
 
 def persist_processed_dataset(

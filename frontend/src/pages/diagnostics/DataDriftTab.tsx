@@ -254,8 +254,8 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
                 <CategoricalDriftRow
                   key={feature}
                   feature={feature}
-                  trainCategories={vals.train_categories ?? []}
-                  newCategories={vals.new_categories ?? []}
+                  trainCount={Number(vals.train_count ?? (vals.train_categories ?? []).length)}
+                  newCount={Number(vals.new_count ?? (vals.new_categories ?? []).length)}
                   newOnly={vals.new_only ?? []}
                   lost={vals.lost ?? []}
                 />

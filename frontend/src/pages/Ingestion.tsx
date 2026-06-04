@@ -123,10 +123,10 @@ function SearchableVariableSelect({
 }
 
 const FILE_KINDS: FileKind[] = [
-  { id: "dev_data", label: INGESTION_DATASETS.dev_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "Development dataset (parquet / csv)", section: "data" },
-  { id: "new_data", label: INGESTION_DATASETS.new_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "New scoring data (parquet / csv)", section: "data" },
-  { id: "hold_data", label: INGESTION_DATASETS.hold_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "Development validation / holdout sample (parquet / csv)", section: "data" },
-  { id: "new_data_oos", label: INGESTION_DATASETS.new_data_oos.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "New validation sample (parquet / csv)", section: "data" },
+  { id: "dev_data", label: INGESTION_DATASETS.dev_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "Existing train cohort (parquet / csv)", section: "data" },
+  { id: "new_data", label: INGESTION_DATASETS.new_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "New train cohort (parquet / csv)", section: "data" },
+  { id: "hold_data", label: INGESTION_DATASETS.hold_data.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "Existing test cohort (parquet / csv)", section: "data" },
+  { id: "new_data_oos", label: INGESTION_DATASETS.new_data_oos.label, ext: ".parquet,.csv", icon: <Database className="h-4 w-4" />, desc: "New test cohort (parquet / csv)", section: "data" },
   { id: "model", label: "Model Object", ext: ".pkl", icon: <Box className="h-4 w-4" />, desc: "Serialized model (.pkl)", section: "model" },
   { id: "preprocess", label: "Preprocessing", ext: ".py", icon: <FileCode className="h-4 w-4" />, desc: "preprocess.py", section: "code" },
   { id: "features", label: "Feature Engineering", ext: ".py", icon: <FileCode className="h-4 w-4" />, desc: "feature_engineering.py", section: "code" },
@@ -691,9 +691,9 @@ export default function Ingestion() {
 
           <Card className="p-5 space-y-3">
             <div>
-              <h2 className="font-semibold text-sm">Development Data</h2>
+              <h2 className="font-semibold text-sm">{INGESTION_DATASETS.dev_data.label}</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Upload Development Data first, then select target and outcome variables from its columns.
+                Upload {INGESTION_DATASETS.dev_data.label} first, then select target and prediction columns from its columns.
               </p>
             </div>
             <FileRow

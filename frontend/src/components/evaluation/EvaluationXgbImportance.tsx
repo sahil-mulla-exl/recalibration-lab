@@ -144,12 +144,12 @@ export function EvaluationXgbImportance({ payload }: EvaluationXgbImportanceProp
         <div className="space-y-5">
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-xl border border-border p-3">
-              <p className="text-xs font-semibold text-muted-foreground mb-2">Production (Development) Model</p>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Existing Model</p>
               <XgbSingleImportanceChart
                 rows={championRows}
                 color={theme.series.dev}
                 fill={theme.series.devFill}
-                title="Production (Development) Model"
+                title="Existing Model"
               />
             </div>
             <div className="rounded-xl border border-border p-3">

@@ -235,7 +235,7 @@ class RecalibrationAgent(Agent):
         super().__init__("recalibration", session_id, queue)
         self._declare_tasks([
             {"id": "apply_variable_drops",  "name": "Apply variable drops"},
-            {"id": "prepare_training_data", "name": "Prepare train and Hold-out feature matrices"},
+            {"id": "prepare_training_data", "name": "Prepare train and test feature matrices"},
             {"id": "setup_hp_search",       "name": "Set up hyperparameter search"},
             {"id": "run_hp_tuning",         "name": "Run hyperparameter tuning (30 trials)"},
             {"id": "train_final_model",     "name": "Train final model on best hyperparameters"},
@@ -284,7 +284,10 @@ class RecalibrationAgent(Agent):
             return outcome_col if outcome_col in df.columns else target_col
 
         processed_dev_path = session.get("processed_dev_path")
+        processed_new_path = session.get("processed_new_path")
         processed_hold_path = session.get("processed_hold_path")
+        processed_recal_train_path = session.get("processed_recal_train_path")
+        processed_recal_train_csv_path = session.get("processed_recal_train_csv_path")
         use_processed_train = bool(processed_dev_path and os.path.exists(processed_dev_path))
 
         # Task 1: apply_variable_drops
@@ -324,9 +327,16 @@ class RecalibrationAgent(Agent):
         oot_df: pd.DataFrame
         oot_source: str
         train_rows: int
+        recal_train_frame: pd.DataFrame | None = None
 
         if use_processed_train:
             train_proc = pd.read_parquet(processed_dev_path)
+            if processed_new_path and os.path.exists(processed_new_path):
+                new_proc = pd.read_parquet(processed_new_path)
+                train_proc = pd.concat([train_proc, new_proc], ignore_index=True)
+                await self.log(
+                    f"Appended New Train Data: {len(new_proc):,} rows → combined training set {len(train_proc):,} rows"
+                )
             train_rows = len(train_proc)
             train_features = [c for c in available_features if c in train_proc.columns]
             if not train_features:
@@ -336,6 +346,7 @@ class RecalibrationAgent(Agent):
             await self._log_console(
                 f"Train matrix from processed dev ({train_rows:,} rows, {len(train_features)} feature columns)"
             )
+            recal_train_frame = train_proc
             X_train, y_train = _prepare_xy_from_processed(
                 train_proc, train_features, dev_outcome_col, max_tuning_features
             )
@@ -389,7 +400,15 @@ class RecalibrationAgent(Agent):
                 y_oot = pd.to_numeric(oot_df[hold_outcome_col], errors="coerce").fillna(0.0).values
         else:
             dev_df = read_tabular_dataframe(dev_path)
-            train_df = dev_df[available_features + [dev_outcome_col]].copy()
+            new_path = session.get("new_data_path")
+            train_frames = [dev_df]
+            if new_path and os.path.exists(new_path):
+                new_raw = read_tabular_dataframe(new_path)
+                train_frames.append(new_raw)
+                await self.log(f"Appended New Train Data: {len(new_raw):,} rows to raw training set")
+            combined = pd.concat(train_frames, ignore_index=True)
+            train_df = combined[available_features + [dev_outcome_col]].copy()
+            recal_train_frame = train_df
             train_rows = len(train_df)
             oot_df, oot_source = load_oot_dataframe(
                 session, dev_path, data_dir=data_dir, prefer_processed=False
@@ -460,6 +479,25 @@ class RecalibrationAgent(Agent):
         else:
             await self.log(f"Train target rate: {y_train.mean()*100:.1f}%")
         await self.log(f"Modeling features: {X_train.shape[1]} (cap={max_tuning_features})")
+
+        from backend.app.utils.processed_paths import persist_recalibration_training_parquet
+
+        processed_recal_train_path = None
+        if recal_train_frame is not None and len(recal_train_frame) > 0:
+            processed_recal_train_path = await asyncio.to_thread(
+                persist_recalibration_training_parquet, recal_train_frame, self.session_id
+            )
+            await self.log(
+                f"Recalibration training artifact saved ({len(recal_train_frame):,} rows): {processed_recal_train_path}"
+            )
+            update_session(
+                self.session_id,
+                {
+                    "processed_recal_train_path": processed_recal_train_path,
+                    "recalibration_training_rows": int(len(recal_train_frame)),
+                },
+            )
+
         await self.task_completed(
             "prepare_training_data",
             f"Train={train_rows:,} | OOT={len(oot_df):,} | Features={X_train.shape[1]} | source={oot_source}",
@@ -681,6 +719,28 @@ class RecalibrationAgent(Agent):
         await self.log(f"Final model trained on {len(X_train):,} rows")
         await self.task_completed("train_final_model", f"{model_class} trained | {len(X_train):,} rows")
 
+        processed_recal_train_path = session.get("processed_recal_train_path")
+        processed_recal_train_csv_path = session.get("processed_recal_train_csv_path")
+        if recal_train_frame is not None and len(recal_train_frame) > 0:
+            from backend.app.utils.processed_paths import persist_processed_dataset
+
+            if is_regression:
+                train_preds = np.asarray(final_model.predict(X_train), dtype=float)
+            else:
+                train_preds = np.asarray(final_model.predict_proba(X_train)[:, 1], dtype=float)
+            recal_train_paths = await asyncio.to_thread(
+                persist_processed_dataset,
+                recal_train_frame,
+                self.session_id,
+                "recal_train",
+                new_scores=train_preds,
+            )
+            processed_recal_train_path = recal_train_paths["parquet"]
+            processed_recal_train_csv_path = recal_train_paths["csv"]
+            await self.log(
+                f"Recalibrated scores on combined training data written: {processed_recal_train_csv_path}"
+            )
+
         # Task 6: score_oot
         await self.task_started("score_oot")
         await asyncio.sleep(0.6)
@@ -773,6 +833,7 @@ class RecalibrationAgent(Agent):
             "selected_outcome_column": outcome_col,
             "dev_outcome_column_used": dev_outcome_col,
             "train_rows": len(X_train),
+            "processed_recal_train_path": processed_recal_train_path,
             "oot_rows": len(oot_df),
             "oot_source": oot_source,
             "tuning_skipped": skip_tuning,
@@ -787,6 +848,8 @@ class RecalibrationAgent(Agent):
             "oot_scores_csv_path": oot_scores_csv_path,
             "processed_hold_path": processed_hold_path,
             "processed_hold_csv_path": processed_hold_csv_path,
+            "processed_recal_train_path": processed_recal_train_path,
+            "processed_recal_train_csv_path": processed_recal_train_csv_path,
             "oot_data_source": oot_source,
         })
 

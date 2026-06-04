@@ -4,22 +4,22 @@
 export const INGESTION_DATASETS = {
   dev_data: {
     id: "dev_data",
-    label: "Development Data",
+    label: "Existing Train Data",
     apiKey: "dev",
   },
   new_data: {
     id: "new_data",
-    label: "New Data",
+    label: "New Train Data",
     apiKey: "new",
   },
   hold_data: {
     id: "hold_data",
-    label: "Development Validation Sample",
+    label: "Existing Test Data",
     apiKey: "hold",
   },
   new_data_oos: {
     id: "new_data_oos",
-    label: "New Validation Sample",
+    label: "New Test Data",
     apiKey: "oot",
   },
 } as const;
@@ -57,12 +57,12 @@ export const DIAGNOSTICS_BENCHMARK_TILES = [
   {
     rowsKey: "new_rows" as const,
     label: INGESTION_DATASETS.new_data.label,
-    hint: "Data & concept drift",
+    hint: "Train append (recalibration)",
   },
   {
     rowsKey: "perf_new_rows" as const,
     label: INGESTION_DATASETS.new_data_oos.label,
-    hint: "Performance comparison",
+    hint: "Data, concept & performance comparison",
   },
 ];
 
@@ -75,7 +75,7 @@ export function perfBaselineLabel(): string {
   return INGESTION_DATASETS.hold_data.label;
 }
 
-/** Comparison cohort on the Performance tab (New Validation Sample). */
+/** Comparison cohort on the Performance tab (New Test Data). */
 export function perfNewLabel(): string {
   return INGESTION_DATASETS.new_data_oos.label;
 }
@@ -95,25 +95,25 @@ export function perfNewShortLabel(): string {
 
 /** Short delta column header for performance comparison tables. */
 export function perfDeltaShortLabel(): string {
-  return "Δ (New - Dev)";
+  return `Δ (${perfNewShortLabel()} − ${perfBaselineShortLabel()})`;
 }
 
 export const CHART_DATAKEY_LABELS: Record<string, string> = {
   trainPct: `${INGESTION_DATASETS.dev_data.label} %`,
-  newPct: `${INGESTION_DATASETS.new_data.label} %`,
+  newPct: `${INGESTION_DATASETS.new_data_oos.label} %`,
   training: INGESTION_DATASETS.dev_data.label,
-  newData: INGESTION_DATASETS.new_data.label,
+  newData: INGESTION_DATASETS.new_data_oos.label,
   trainAuc: INGESTION_DATASETS.dev_data.label,
-  newAuc: INGESTION_DATASETS.new_data.label,
+  newAuc: INGESTION_DATASETS.new_data_oos.label,
   ivTrain: INGESTION_DATASETS.dev_data.label,
-  ivNew: INGESTION_DATASETS.new_data.label,
+  ivNew: INGESTION_DATASETS.new_data_oos.label,
   devImportance: INGESTION_DATASETS.hold_data.label,
   newImportance: INGESTION_DATASETS.new_data_oos.label,
   dev: INGESTION_DATASETS.hold_data.label,
   new: INGESTION_DATASETS.new_data_oos.label,
   current: INGESTION_DATASETS.new_data_oos.label,
   trainEventRatePct: `${INGESTION_DATASETS.dev_data.label} event rate`,
-  newEventRatePct: `${INGESTION_DATASETS.new_data.label} event rate`,
+  newEventRatePct: `${INGESTION_DATASETS.new_data_oos.label} event rate`,
 };
 
 export function chartDataKeyLabel(dataKey: string | number | undefined, fallback?: string): string {
@@ -122,7 +122,7 @@ export function chartDataKeyLabel(dataKey: string | number | undefined, fallback
 }
 
 export function driftCompareSubtitle(): string {
-  return `${driftBaselineLabel()} vs ${INGESTION_DATASETS.new_data.label}`;
+  return `${driftBaselineLabel()} vs ${INGESTION_DATASETS.new_data_oos.label}`;
 }
 
 export function perfCompareSubtitle(): string {

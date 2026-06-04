@@ -78,7 +78,7 @@ def load_oos_evaluation_dataframe(
     prefer_processed: bool = True,
 ) -> Tuple[pd.DataFrame, str]:
     """
-    Return New Validation Sample (OOS) for evaluation.
+    Return New Test Data for evaluation.
 
     Priority:
     1. processed_oos_path
@@ -98,5 +98,5 @@ def load_oos_evaluation_dataframe(
         return hold_df.copy(), "hold_fallback_for_oos"
 
     raise FileNotFoundError(
-        "New Validation Sample is required for evaluation. Upload new_data_oos or run data processing."
+        "New Test Data is required for evaluation. Upload new_data_oos or run data processing."
     )

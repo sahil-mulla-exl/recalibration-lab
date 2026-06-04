@@ -38,14 +38,6 @@ import {
   type ShapImportancePayload,
 } from "@/components/evaluation/EvaluationShapImportance";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   EVALUATION_DATA_KEYS,
   EVALUATION_KS_COHORTS,
   EVALUATION_SERIES,
@@ -380,8 +372,6 @@ export default function Evaluation() {
   const selectedProductionKs =
     productionKsCohorts.find((c) => c.key === productionKsKey) ?? productionKsCohorts[0];
 
-  const impTable = ((report?.importance_table || []) as Array<{ feature: string; orig_importance: number; new_importance: number }>)
-    .slice(0, 10);
   const xgboostImportance = (report?.xgboost_importance || null) as XgboostImportancePayload | null;
   const {
     showAuc,
@@ -389,6 +379,7 @@ export default function Evaluation() {
     showGini,
     showCalibration,
     showLift,
+    showRankOrderBreak,
     showFeatureImportance,
     showRmse,
     showMae,
@@ -746,8 +737,7 @@ export default function Evaluation() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {productionKsCohorts.length > 0 && selectedProductionKs && (
                   <ChartCard
-                    title="KS Curve — Production validation"
-                    subtitle="Champion model on development or new validation holdout"
+                    title="KS Curve — Existing Model validation"
                     className="w-full"
                     actions={
                       productionKsCohorts.length > 1 ? (
@@ -778,7 +768,7 @@ export default function Evaluation() {
             )}
           </div>
 
-          {problemType === "classification" && showLift && report && (
+          {problemType === "classification" && showRankOrderBreak && report && (
             <EvaluationRankOrderBreak
               report={report}
               theme={theme}
@@ -819,44 +809,6 @@ export default function Evaluation() {
                 </ResponsiveContainer>
               </ChartFrame>
             </ChartCard>
-          )}
-
-          {/* Feature importance */}
-          {showFeatureImportance && impTable.length > 0 && (
-            <Card className="p-5">
-              <h3 className="font-semibold text-sm mb-1">Feature Importance (Top 10)</h3>
-              <p className="text-xs text-muted-foreground mb-4">
-                Model-level importance: {EVALUATION_SERIES.championOos} vs {EVALUATION_SERIES.recalibratedOos}
-              </p>
-              <div className="rounded-xl border border-border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Feature</TableHead>
-                      <TableHead className="text-right">{EVALUATION_SERIES.championOos}</TableHead>
-                      <TableHead className="text-right">{EVALUATION_SERIES.recalibratedOos}</TableHead>
-                      <TableHead className="text-right">Δ (Recal − Production)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {impTable.map((row) => {
-                      const delta = row.new_importance - row.orig_importance;
-                      return (
-                        <TableRow key={row.feature}>
-                          <TableCell className="font-medium">{row.feature}</TableCell>
-                          <TableCell className="text-right font-mono text-sm">{row.orig_importance.toFixed(4)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm">{row.new_importance.toFixed(4)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm text-muted-foreground">
-                            {delta >= 0 ? "+" : ""}
-                            {delta.toFixed(4)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
           )}
 
           {showXgbNativeImportance && (

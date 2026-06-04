@@ -1,18 +1,18 @@
-import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
+import { driftBaselineLabel, perfNewLabel } from "@/config/datasets";
 import { Card } from "@/components/ui/card";
 
 type CategoricalDriftRowProps = {
   feature: string;
-  trainCategories: string[];
-  newCategories: string[];
+  trainCount: number;
+  newCount: number;
   newOnly: string[];
   lost: string[];
 };
 
 export function CategoricalDriftRow({
   feature,
-  trainCategories,
-  newCategories,
+  trainCount,
+  newCount,
   newOnly,
   lost,
 }: CategoricalDriftRowProps) {
@@ -37,7 +37,7 @@ export function CategoricalDriftRow({
 
   const statusText = hasNew ? "New category" : hasLost ? "Lost category" : "Stable";
   const summaryText = isStable
-    ? `${newCategories.length} categories - stable`
+    ? `${trainCount} → ${newCount} categories (stable)`
     : `${newOnly.length} new, ${lost.length} lost vs ${driftBaselineLabel().toLowerCase()}`;
 
   const pillClass =
@@ -57,33 +57,26 @@ export function CategoricalDriftRow({
 
         <div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">{driftBaselineLabel()}</div>
-          <div className="flex flex-wrap gap-1">
-            {trainCategories.map((cat) => (
-              <span key={`train-${feature}-${cat}`} className={pillClass}>
-                {cat}
-              </span>
-            ))}
-          </div>
+          <div className="text-sm font-mono tabular-nums">{trainCount} categories</div>
         </div>
 
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">{INGESTION_DATASETS.new_data.label}</div>
-          <div className="flex flex-wrap gap-1">
-            {newCategories.map((cat) => {
-              const isNew = newOnly.includes(cat);
-              return (
-                <span key={`new-${feature}-${cat}`} className={isNew ? newPillClass : pillClass}>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">{perfNewLabel()}</div>
+          <div className="text-sm font-mono tabular-nums mb-1">{newCount} categories</div>
+          {(hasNew || hasLost) && (
+            <div className="flex flex-wrap gap-1">
+              {newOnly.map((cat) => (
+                <span key={`new-${feature}-${cat}`} className={newPillClass}>
                   {cat}
-                  {isNew ? " +" : ""}
                 </span>
-              );
-            })}
-            {lost.map((cat) => (
-              <span key={`lost-${feature}-${cat}`} className={lostPillClass}>
-                {cat} x
-              </span>
-            ))}
-          </div>
+              ))}
+              {lost.map((cat) => (
+                <span key={`lost-${feature}-${cat}`} className={lostPillClass}>
+                  {cat}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="min-w-[130px]">

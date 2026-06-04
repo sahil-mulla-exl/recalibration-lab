@@ -1,13 +1,13 @@
 import { INGESTION_DATASETS } from "@/config/datasets";
 
-const DEV = INGESTION_DATASETS.dev_data.label;
-const HOLD = INGESTION_DATASETS.hold_data.label;
+const TRAIN = INGESTION_DATASETS.dev_data.label;
+const EXISTING_TEST = INGESTION_DATASETS.hold_data.label;
 
 export const DIAGNOSTICS_TABS = [
-  { id: "data", label: "Data Drift", benchmark: DEV },
-  { id: "concept", label: "Concept Drift", benchmark: DEV },
-  { id: "performance", label: "Performance Drift", benchmark: HOLD },
-  { id: "summary", label: "Decision", benchmark: HOLD },
+  { id: "performance", label: "Performance Drift", benchmark: EXISTING_TEST },
+  { id: "data", label: "Data Drift", benchmark: TRAIN },
+  { id: "concept", label: "Concept Drift", benchmark: TRAIN },
+  { id: "summary", label: "Recalibration Decision", benchmark: EXISTING_TEST },
 ] as const;
 
 /** Section order when rendering combined Data Drift view (no nested tabs). */
@@ -65,7 +65,7 @@ export function usesHyperparameterOptimization(action: string | undefined | null
 export const DIAGNOSTIC_ACTION_MESSAGES = {
   recal_same_hp: {
     summary:
-      "Re-fit the champion model on current Development and New data using the same hyperparameters already stored with the uploaded model.",
+      "Re-fit the champion model on appended Existing Train and New Train data using the same hyperparameters already stored with the uploaded model.",
     detail:
       "No hyperparameter search is run. This path is faster and keeps training settings aligned with the approved inventory model. Choose this when drift is mainly in the population or target rate, and concept-level signals (IV, monotonicity) have not broken down severely.",
   },

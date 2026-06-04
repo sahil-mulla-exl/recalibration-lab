@@ -15,6 +15,7 @@ import {
 import { CalibrationChart } from "@/components/diagnostics/CalibrationChart";
 import { ChartCard } from "@/components/diagnostics/ChartCard";
 import { DecileChart } from "@/components/diagnostics/DecileChart";
+import { DiagnosticsRankOrderBreak } from "@/components/diagnostics/DiagnosticsRankOrderBreak";
 import { KsChart } from "@/components/diagnostics/KsChart";
 import { toKsChartData } from "@/lib/ksCurve";
 import { PdpChart } from "@/components/diagnostics/PdpChart";
@@ -127,6 +128,13 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
     vis.showGini ? { metric: "Gini", dev: Number(perf.gini_dev ?? 0), current: Number(perf.gini_new ?? 0) } : null,
     vis.showAuc
       ? { metric: "AUC-PR", dev: Number(perf.auc_pr_dev ?? 0), current: Number(perf.auc_pr_new ?? 0) }
+      : null,
+    vis.showCalibration
+      ? {
+          metric: "Calibration Error",
+          dev: Number(perf.cal_error_dev ?? 0),
+          current: Number(perf.cal_error_new ?? 0),
+        }
       : null,
   ].filter((row): row is { metric: string; dev: number; current: number } => row != null);
 
@@ -413,24 +421,28 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
                 </ChartCard>
               )}
             </div>
-            {vis.showKsCurve && (
-              <ChartCard title="KS Curve" className="w-full">
-                <KsChart
-                  data={toKsChartData(
-                    (perf.ks_curve_new ?? []) as Array<{
-                      population_pct: number;
-                      cum_pos_pct: number;
-                      cum_neg_pct: number;
-                      ks?: number;
-                    }>,
-                  )}
-                />
-              </ChartCard>
-            )}
-            {vis.showCalibrationChart && (
-              <ChartCard title="Calibration" className="w-full md:max-w-xl">
-                <CalibrationChart data={calibrationData} />
-              </ChartCard>
+            {(vis.showKsCurve || vis.showCalibrationChart) && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
+                {vis.showKsCurve && (
+                  <ChartCard title="KS Curve" className="w-full min-w-0">
+                    <KsChart
+                      data={toKsChartData(
+                        (perf.ks_curve_new ?? []) as Array<{
+                          population_pct: number;
+                          cum_pos_pct: number;
+                          cum_neg_pct: number;
+                          ks?: number;
+                        }>,
+                      )}
+                    />
+                  </ChartCard>
+                )}
+                {vis.showCalibrationChart && (
+                  <ChartCard title="Calibration" className="w-full min-w-0">
+                    <CalibrationChart data={calibrationData} />
+                  </ChartCard>
+                )}
+              </div>
             )}
           </div>
       </div>
@@ -439,7 +451,8 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
       {vis.showRankOrderBlock && (
       <div className="space-y-4">
           <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[2].label} subtitle="Decile stability, lift, and rank-order checks" />
-          {vis.showDecileLift && (
+          <DiagnosticsRankOrderBreak perf={perf} />
+          {vis.showDecileLift && decileData.length > 0 && (
           <ChartCard title="Decile event rates" className="w-full">
             <DecileChart data={decileData} />
           </ChartCard>

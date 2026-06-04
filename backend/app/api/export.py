@@ -15,7 +15,12 @@ from backend.app.utils.export_scores import (
     resolve_upload_reference_path,
 )
 from backend.app.utils.data_io import read_tabular_dataframe
-from backend.app.utils.processed_paths import processed_csv_path, score_comparison_path
+from backend.app.utils.processed_paths import (
+    persist_recalibration_training_parquet,
+    processed_csv_path,
+    processed_parquet_path,
+    score_comparison_path,
+)
 
 router = APIRouter()
 
@@ -386,6 +391,72 @@ async def export_score_comparison(
         media_type=media_type,
         filename=download_name,
     )
+
+
+def _build_recalibration_training_frame(session: dict) -> pd.DataFrame | None:
+    """Concatenate processed Existing Train + New Train (fallback if artifact missing)."""
+    dev_path = session.get("processed_dev_path")
+    new_path = session.get("processed_new_path")
+    if not dev_path or not os.path.exists(dev_path):
+        return None
+    frames = [pd.read_parquet(dev_path)]
+    if new_path and os.path.exists(new_path):
+        frames.append(pd.read_parquet(new_path))
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def _ensure_recalibration_training_artifact(session_id: str, session: dict) -> str | None:
+    """Return parquet path for combined training data; build once if recalibration has not run yet."""
+    parquet_path = session.get("processed_recal_train_path") or processed_parquet_path(
+        session_id, "recal_train"
+    )
+    if parquet_path and os.path.exists(parquet_path):
+        return parquet_path
+    df = _build_recalibration_training_frame(session)
+    if df is None:
+        return None
+    parquet_path = persist_recalibration_training_parquet(df, session_id)
+    update_session(
+        session_id,
+        {
+            "processed_recal_train_path": parquet_path,
+            "recalibration_training_rows": int(len(df)),
+        },
+    )
+    return parquet_path
+
+
+@router.get("/recalibration-training-data")
+async def export_recalibration_training_data(
+    session_id: str = Query(...),
+    format: str = Query("csv", pattern="^(csv|parquet)$"),
+):
+    """Serve cached combined Existing Train + New Train used for recalibration (fast path)."""
+    session = get_session(session_id)
+    if not session:
+        return Response(content="Session not found", status_code=404)
+
+    parquet_path = _ensure_recalibration_training_artifact(session_id, session)
+    if not parquet_path:
+        return Response(
+            content="Recalibration training data not found. Run Data Processing and Recalibration first.",
+            status_code=404,
+        )
+    session = get_session(session_id) or session
+
+    if format == "parquet":
+        return FileResponse(
+            parquet_path,
+            media_type="application/octet-stream",
+            filename="recalibration_training_data.parquet",
+        )
+
+    csv_path = session.get("processed_recal_train_csv_path") or processed_csv_path(session_id, "recal_train")
+    if not os.path.exists(csv_path):
+        pd.read_parquet(parquet_path).to_csv(csv_path, index=False)
+        update_session(session_id, {"processed_recal_train_csv_path": csv_path})
+
+    return FileResponse(csv_path, media_type="text/csv", filename="recalibration_training_data.csv")
 
 
 @router.post("/feature-list")

@@ -372,7 +372,9 @@ def compute_cardinality_drift(train_series: pd.Series, new_series: pd.Series) ->
         "new_categories": new_cats,
         "new_only": new_only,
         "lost": lost,
-        "new_count": len(new_only),
+        "train_count": len(train_cats),
+        "new_count": len(new_cats),
+        "new_only_count": len(new_only),
         "lost_count": len(lost),
     }
 

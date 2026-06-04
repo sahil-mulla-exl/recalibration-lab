@@ -47,7 +47,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "score_hold_data", name: `Score ${HOLD} with model`, status: "pending" },
     { id: "score_new_data_oos", name: `Score ${NEW_VAL} with model`, status: "pending" },
     { id: "predict_new_outcome", name: "Finalize outcomes and persist artifacts", status: "pending" },
-    { id: "compare_to_original", name: "Compare to original scores (Spearman ρ)", status: "pending" },
+    { id: "compare_to_original", name: "Compare to original scores", status: "pending" },
     { id: "evaluate_threshold", name: "Evaluate reproducibility threshold", status: "pending" },
   ],
   drift: [
@@ -60,7 +60,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
   ],
   recalibration: [
     { id: "apply_variable_drops", name: "Apply variable drops", status: "pending" },
-    { id: "prepare_training_data", name: "Prepare train and Hold-out feature matrices", status: "pending" },
+    { id: "prepare_training_data", name: "Prepare train and test feature matrices", status: "pending" },
     { id: "setup_hp_search", name: "Set up hyperparameter search", status: "pending" },
     { id: "run_hp_tuning", name: "Run hyperparameter tuning (30 trials)", status: "pending" },
     { id: "train_final_model", name: "Train final model on best hyperparameters", status: "pending" },
@@ -102,15 +102,15 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
   },
   drift: {
     load_context: `Load processed ${DEV}, ${NEW}, ${HOLD}, and ${NEW_VAL}; model feature list from .pkl; thresholds from inventory.`,
-    compute_data_drift: `Compute PSI, CSI, missingness, cardinality, and target-rate drift between ${DEV} and ${NEW}.`,
-    compute_concept_drift: `Compute IV, univariate Gini (raw variable AUC), and bivariate monotonicity (${HOLD} vs ${NEW}).`,
+    compute_data_drift: `Compute PSI, CSI, missingness, cardinality, and target-rate drift between ${DEV} and ${NEW_VAL}.`,
+    compute_concept_drift: `Compute IV, univariate Gini (raw variable AUC), and bivariate monotonicity (${DEV} vs ${NEW_VAL}).`,
     compute_performance_drift: `Compare ROC, KS, lift, and calibration between ${HOLD} and ${NEW_VAL}.`,
     compute_interpretability: "Compute SHAP-style feature importance and partial dependence profiles where configured.",
     assemble_report: "Merge all diagnostic signals, apply governance rules, and produce the recommendation verdict.",
   },
   recalibration: {
     apply_variable_drops: "Remove variables flagged during diagnostics from the training feature set.",
-    prepare_training_data: "Build train and out-of-time matrices with aligned labels and weights.",
+    prepare_training_data: `Append ${NEW} to ${DEV} and build train / test matrices with aligned labels.`,
     setup_hp_search: "Configure search space and optimization method from inventory settings.",
     run_hp_tuning: "Run cross-validated hyperparameter search trials and track best score.",
     train_final_model: "Fit the final model using the best hyperparameters on the full training window.",

@@ -50,6 +50,14 @@ const PHRASE_REPLACEMENTS: Array<[string, string]> = [
   ["Processed OOS", `Processed ${NEW_VAL}`],
   ["Processed dev", `Processed ${DEV}`],
   ["Processed new", `Processed ${NEW}`],
+  ["Production", "Existing Model"],
+  ["production", "existing model"],
+  ["Holdout", "Test"],
+  ["holdout", "test"],
+  ["Development Data", DEV],
+  ["New Data", NEW],
+  ["Development Validation Sample", HOLD],
+  ["New Validation Sample", NEW_VAL],
 ];
 
 /** Replace legacy dev/new/hold/OOS shorthand in agent logs and summaries. */

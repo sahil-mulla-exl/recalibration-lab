@@ -47,6 +47,7 @@ from backend.app.utils.interpretability import (
     compute_shap_shift_flags,
 )
 from backend.app.utils.model_features import resolve_session_model_features
+from backend.app.config.datasets import HOLD_DATA, NEW_VALIDATION
 from backend.app.utils.model_helpers import (
     TARGET_COL,
     load_model,
@@ -307,13 +308,13 @@ class DriftDiagnosticsAgent(Agent):
             raise ValueError("Data processing artifacts missing. Run Data Processing agent first.")
         if not hold_path or not os.path.exists(hold_path):
             raise ValueError(
-                "Development Validation Sample (hold) is required for performance diagnostics. "
-                "Upload hold data and complete data processing."
+                f"{HOLD_DATA} is required for performance diagnostics. "
+                "Upload existing test data and complete data processing."
             )
         if not oos_path or not os.path.exists(oos_path):
             raise ValueError(
-                "New Validation Sample (OOS) is required for performance diagnostics. "
-                "Upload new validation sample and complete data processing."
+                f"{NEW_VALIDATION} is required for performance diagnostics. "
+                "Upload new test data and complete data processing."
             )
 
         train_df = pd.read_parquet(training_path)
@@ -336,7 +337,7 @@ class DriftDiagnosticsAgent(Agent):
         elif "predicted_outcome" in perf_new_df.columns:
             perf_new_target_col = "predicted_outcome"
         else:
-            raise ValueError("New Validation Sample missing target/outcome columns")
+            raise ValueError(f"{NEW_VALIDATION} missing target/outcome columns")
 
         if target_col in new_df.columns:
             new_target_col = target_col
@@ -345,7 +346,7 @@ class DriftDiagnosticsAgent(Agent):
         elif "predicted_outcome" in new_df.columns:
             new_target_col = "predicted_outcome"
         else:
-            raise ValueError("New Data processed artifact missing target/outcome columns")
+            raise ValueError("New Train Data processed artifact missing target/outcome columns")
 
         model_path = session.get("model_path")
         feature_cols = self._resolve_feature_columns(
@@ -359,9 +360,9 @@ class DriftDiagnosticsAgent(Agent):
         )
 
         raw_train_path = session.get("dev_data_path") or training_path
-        raw_new_path = session.get("new_data_path") or new_path
+        raw_drift_new_path = session.get("new_data_oos_path") or oos_path
         raw_train_df = read_tabular_dataframe(raw_train_path)
-        raw_new_df = read_tabular_dataframe(raw_new_path)
+        raw_new_df = read_tabular_dataframe(raw_drift_new_path)
 
         return DiagnosticsContext(
             session=session,
@@ -385,8 +386,10 @@ class DriftDiagnosticsAgent(Agent):
         )
 
     def _run_data_drift(self, ctx: DiagnosticsContext) -> Dict[str, Any]:
+        drift_df = ctx.perf_new_df
+        drift_target_col = ctx.perf_new_target_col
         train_target = self._coerce_binary_target(ctx.train_df[ctx.train_target_col])
-        new_target = self._coerce_binary_target(ctx.new_df[ctx.new_target_col])
+        new_target = self._coerce_binary_target(drift_df[drift_target_col])
         train_target_rate = float(train_target.mean())
         new_target_rate = float(new_target.mean())
         target_delta_pp = (new_target_rate - train_target_rate) * 100.0
@@ -395,9 +398,9 @@ class DriftDiagnosticsAgent(Agent):
         csi_results: Dict[str, Any] = {}
         for col in ctx.feature_cols:
             if col in categorical_feature_cols:
-                details = compute_csi_categorical_details(ctx.train_df[col], ctx.new_df[col])
+                details = compute_csi_categorical_details(ctx.train_df[col], drift_df[col])
             else:
-                details = compute_csi_with_frozen_bins(ctx.train_df[col], ctx.new_df[col], n_bins=10)
+                details = compute_csi_with_frozen_bins(ctx.train_df[col], drift_df[col], n_bins=10)
             csi_results[col] = {
                 "value": float(details.get("csi", 0.0)),
                 "severity": classify_csi(float(details.get("csi", 0.0)), ctx.governance),
@@ -430,9 +433,10 @@ class DriftDiagnosticsAgent(Agent):
         desc_processed = {
             col: {
                 "training": compute_descriptive_stats(ctx.train_df[col]),
-                "new": compute_descriptive_stats(ctx.new_df[col]),
+                "new": compute_descriptive_stats(drift_df[col]),
             }
             for col in ctx.feature_cols
+            if col in drift_df.columns
         }
         target_breakdown: Dict[str, Any] = {}
         # Use processed categoricals (incl. low-cardinality numeric) and raw object columns
@@ -443,9 +447,9 @@ class DriftDiagnosticsAgent(Agent):
         breakdown_cols = list(dict.fromkeys(breakdown_cols))[:25]
 
         for col in breakdown_cols:
-            if col in ctx.train_df.columns and col in ctx.new_df.columns:
+            if col in ctx.train_df.columns and col in drift_df.columns:
                 train_segment_series = ctx.train_df[col]
-                new_segment_series = ctx.new_df[col]
+                new_segment_series = drift_df[col]
                 train_target_series = self._coerce_binary_target(ctx.train_df[ctx.train_target_col])
                 new_target_series = self._coerce_binary_target(ctx.new_df[ctx.new_target_col])
             else:
@@ -508,12 +512,16 @@ class DriftDiagnosticsAgent(Agent):
     def _run_concept_drift(self, ctx: DiagnosticsContext) -> Dict[str, Any]:
         iv_by_feature: Dict[str, Any] = {}
         bivariate: Dict[str, Any] = {}
+        drift_df = ctx.perf_new_df
+        drift_target_col = ctx.perf_new_target_col
         y_train = self._coerce_binary_target(ctx.train_df[ctx.train_target_col]).astype(int)
-        y_new = self._coerce_binary_target(ctx.new_df[ctx.new_target_col]).astype(int)
+        y_new = self._coerce_binary_target(drift_df[drift_target_col]).astype(int)
         numeric_cols = self._infer_numeric_features(ctx.train_df, ctx.feature_cols)
         for col in numeric_cols:
+            if col not in drift_df.columns:
+                continue
             iv = compute_woe_iv_with_frozen_bins(
-                ctx.train_df[col], y_train, ctx.new_df[col], y_new, n_bins=10
+                ctx.train_df[col], y_train, drift_df[col], y_new, n_bins=10
             )
             iv_by_feature[col] = {
                 "iv_train": float(iv["iv_train"]),
@@ -526,15 +534,15 @@ class DriftDiagnosticsAgent(Agent):
                 "mono_new": bool(iv["mono_new"]),
             }
             bivariate[col] = compute_bivariate_event_rate(
-                ctx.train_df[col], y_train, ctx.new_df[col], y_new, n_bins=10
+                ctx.train_df[col], y_train, drift_df[col], y_new, n_bins=10
             )
 
         gini_uni = compute_univariate_gini_comparison(
-            ctx.dev_oos_df,
-            ctx.new_df,
+            ctx.train_df,
+            drift_df,
             ctx.feature_cols,
-            ctx.dev_target_col,
-            ctx.new_target_col,
+            ctx.train_target_col,
+            drift_target_col,
         )
 
         return {
@@ -603,6 +611,10 @@ class DriftDiagnosticsAgent(Agent):
         new_rates = compute_decile_event_rates(new_y, new_scores)
         rob_dev = compute_rob_monotonicity(dev_rates)
         rob_new = compute_rob_monotonicity(new_rates)
+        cal_dev = compute_calibration_by_decile(dev_y, dev_scores)
+        cal_new = compute_calibration_by_decile(new_y, new_scores)
+        cal_error_dev = float(np.mean([r["dev_pct"] for r in cal_dev])) if cal_dev else 0.0
+        cal_error_new = float(np.mean([r["dev_pct"] for r in cal_new])) if cal_new else 0.0
         return {
             "auc_dev": dev_auc,
             "auc_new": new_auc,
@@ -627,8 +639,10 @@ class DriftDiagnosticsAgent(Agent):
             "classification_new": clf_new,
             "dev_lift_table": dev_lift,
             "new_lift_table": new_lift,
-            "calibration_dev": compute_calibration_by_decile(dev_y, dev_scores),
-            "calibration_new": compute_calibration_by_decile(new_y, new_scores),
+            "calibration_dev": cal_dev,
+            "calibration_new": cal_new,
+            "cal_error_dev": cal_error_dev,
+            "cal_error_new": cal_error_new,
             "rob_dev": rob_dev,
             "rob_new": rob_new,
             "roc_curve_dev": compute_roc_curve_points(dev_y, dev_scores, n=60),
@@ -747,7 +761,7 @@ class DriftDiagnosticsAgent(Agent):
             "recal_with_hp_opt": (
                 "Concept drift and/or a material performance drop were detected alongside population shift. "
                 "Recalibrate with hyperparameter optimization to search for settings that restore discrimination "
-                "and stability on the New Validation Sample."
+                f"and stability on the {NEW_VALIDATION}."
             ),
             "recal_same_hp": (
                 "Population or target drift was detected without severe concept breakdown. "

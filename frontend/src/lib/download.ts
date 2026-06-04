@@ -24,6 +24,27 @@ export function downloadFeatureListCsv(features: string[], filename: string) {
 }
 
 /** Download selected features as .xlsx via backend export API. */
+/** Download cached combined Existing Train + New Train recalibration dataset (CSV). */
+export async function downloadRecalibrationTrainingData(
+  sessionId: string,
+  filename = "recalibration_training_data.csv",
+) {
+  const res = await fetch(`/api/export/recalibration-training-data?session_id=${encodeURIComponent(sessionId)}&format=csv`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Recalibration dataset export failed");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 export async function downloadFeatureListXlsx(
   sessionId: string,
   features: string[],

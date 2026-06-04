@@ -34,7 +34,7 @@ from backend.app.utils.interpretability import (
     compute_shap_importance,
     compute_shap_shift_flags,
 )
-from backend.app.config.datasets import HOLD_DATA, NEW_VALIDATION
+from backend.app.config.datasets import DEV_DATA, HOLD_DATA, NEW_DATA, NEW_VALIDATION
 from backend.app.config.agent_task_labels import EVAL_SCORE_HOLDOUTS
 
 
@@ -163,6 +163,57 @@ class EvaluationAgent(Agent):
             "score_oot_with_original",
             f"{HOLD_DATA}={len(champion_hold_scores):,} | {NEW_VALIDATION}={len(recalibrated_oos_scores):,}",
         )
+
+        champion_train_metrics: Dict[str, Any] = {}
+        recal_train_metrics: Dict[str, Any] = {}
+        recal_train_df = None
+        recal_train_source = ""
+        recal_train_path = session.get("processed_recal_train_path")
+        if recal_train_path and os.path.exists(recal_train_path):
+            recal_train_df = pd.read_parquet(recal_train_path)
+            recal_train_source = "recalibration_training"
+            train_feature_cols = resolve_session_model_features(
+                session,
+                recal_train_df,
+                exclude={
+                    target_col,
+                    outcome_col,
+                    TARGET_COL,
+                    "predicted_outcome",
+                    "predict_proba",
+                    "predicted_proba",
+                    "new_score",
+                },
+            )
+            y_train_eval = _resolve_y_vector(recal_train_df, target_col, outcome_col)
+            champion_train_scores = await _score_with_progress(
+                f"Champion on {DEV_DATA}+{NEW_DATA}", orig_model, recal_train_df, train_feature_cols
+            )
+            recal_train_scores = _extract_recalibrated_scores(
+                recal_train_df, None, len(recal_train_df)
+            )
+            if recal_train_scores is None:
+                recal_train_scores = await _score_with_progress(
+                    f"Recalibrated on {DEV_DATA}+{NEW_DATA}",
+                    new_model,
+                    recal_train_df,
+                    train_feature_cols,
+                )
+            champion_train_metrics = _compute_cohort_metrics(
+                y_train_eval, champion_train_scores, is_regression
+            )
+            recal_train_metrics = _compute_cohort_metrics(
+                y_train_eval, recal_train_scores, is_regression
+            )
+            await self.log(
+                f"Combined training cohort ({len(recal_train_df):,} rows): "
+                f"champion vs recalibrated on appended {DEV_DATA} + {NEW_DATA}"
+            )
+            if not is_regression:
+                await self.log(
+                    f"Training AUC — champion: {champion_train_metrics.get('auc', 0):.4f} | "
+                    f"recalibrated: {recal_train_metrics.get('auc', 0):.4f}"
+                )
 
         await asyncio.sleep(0.5)
 
@@ -495,7 +546,21 @@ class EvaluationAgent(Agent):
                 "champion_hold": _cohort_payload(hold_metrics, hold_source, len(hold_df)),
                 "champion_oos": _cohort_payload(champion_oos_metrics, oos_source, len(oos_df)),
                 "recalibrated_oos": _cohort_payload(recal_oos_metrics, oos_source, len(oos_df)),
+                **(
+                    {
+                        "champion_train": _cohort_payload(
+                            champion_train_metrics, recal_train_source, len(recal_train_df)
+                        ),
+                        "recalibrated_train": _cohort_payload(
+                            recal_train_metrics, recal_train_source, len(recal_train_df)
+                        ),
+                    }
+                    if recal_train_df is not None and len(recal_train_metrics) > 0
+                    else {}
+                ),
             },
+            "recalibration_training_path": recal_train_path,
+            "recalibration_training_rows": int(len(recal_train_df)) if recal_train_df is not None else 0,
             "hold_source": hold_source,
             "oos_source": oos_source,
             "orig_auc": round(orig_auc, 4),
@@ -581,7 +646,7 @@ def _resolve_y_vector(df: pd.DataFrame, target_col: str, outcome_col: str) -> np
     y_col = target_col if target_col in df.columns else (outcome_col if outcome_col in df.columns else None)
     if y_col is None:
         raise ValueError(
-            f"Holdout data missing selected target/outcome columns: target='{target_col}', outcome='{outcome_col}'"
+            f"Test data missing selected target/outcome columns: target='{target_col}', outcome='{outcome_col}'"
         )
     return df[y_col].values
 

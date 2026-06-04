@@ -31,6 +31,21 @@ export function toKsChartData(points: KsCurvePoint[]): KsChartPoint[] {
     }));
 }
 
+/** Population % at maximum KS separation (for vertical reference line). */
+export function ksMaxPopulationPct(data: KsChartPoint[]): number | undefined {
+  if (!data.length) return undefined;
+  let bestKs = -1;
+  let pop = 0;
+  for (const p of data) {
+    const ks = Number(p.ks ?? 0);
+    if (ks > bestKs) {
+      bestKs = ks;
+      pop = Number(p.population_pct);
+    }
+  }
+  return bestKs >= 0 ? pop : undefined;
+}
+
 /** Maximum KS separation across curve points (same scale as chart data). */
 export function maxKsFromChartData(data: KsChartPoint[]): number | undefined {
   if (!data.length) return undefined;

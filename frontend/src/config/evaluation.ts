@@ -2,9 +2,9 @@ import type { KsCurvePoint } from "@/lib/ksCurve";
 
 /** Evaluation table / chart cohort column headers. */
 export const EVALUATION_SERIES = {
-  championHold: "PRODUCTION DEV VALIDATION",
-  championOos: "PRODUCTION NEW VALIDATION",
-  recalibratedOos: "RECAL NEW VALIDATION",
+  championHold: "EXISTING MODEL · EXISTING TEST",
+  championOos: "EXISTING MODEL · NEW TEST",
+  recalibratedOos: "RECALIBRATED · NEW TEST",
 } as const;
 
 export type EvaluationCohortKey = "champion_hold" | "champion_oos" | "recalibrated_oos";
@@ -68,6 +68,7 @@ export const EVALUATION_CHART_LABELS: Record<string, string> = {
   Champion: EVALUATION_SERIES.championOos,
   Recalibrated: EVALUATION_SERIES.recalibratedOos,
   Production: EVALUATION_SERIES.championOos,
+  ExistingModel: EVALUATION_SERIES.championOos,
 };
 
 export function evaluationChartLabel(dataKey: string | number | undefined, fallback?: string): string {

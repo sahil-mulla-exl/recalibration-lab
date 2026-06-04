@@ -55,6 +55,8 @@ export type EvaluationMetricVisibility = {
   showGini: boolean;
   showCalibration: boolean;
   showLift: boolean;
+  /** Rank-order break decile analysis (classification; not tied to Lift/Gains alone). */
+  showRankOrderBreak: boolean;
   showFeatureImportance: boolean;
   showRmse: boolean;
   showMae: boolean;
@@ -78,9 +80,18 @@ export function evaluationMetricVisibility(
     showMae: perf.has("MAE"),
     showR2: perf.has("R2"),
   };
+  const hasAny = Object.values(flags).some(Boolean);
+  const showRankOrderBreak =
+    problemType === "classification" &&
+    (flags.showLift ||
+      flags.showAuc ||
+      flags.showKs ||
+      flags.showGini ||
+      flags.showCalibration);
   return {
     ...flags,
-    hasAny: Object.values(flags).some(Boolean),
+    showRankOrderBreak,
+    hasAny,
   };
 }
 
@@ -125,14 +136,14 @@ export function perfDriftVisibility(
     ...ev,
     showClassificationBlock: clsBlock,
     showDiscriminationBlock: discBlock,
-    showRankOrderBlock: ev.showLift,
+    showRankOrderBlock: ev.showRankOrderBreak,
     // Backend always computes SHAP/PDP for classification; show whenever any perf metric is selected.
     showInterpretabilityBlock: ev.hasAny,
     showScorePsi: ev.showAuc,
     showRoc: ev.showAuc,
     showKsCurve: ev.showKs,
     showCalibrationChart: ev.showCalibration,
-    showDecileLift: ev.showLift,
+    showDecileLift: ev.showLift || ev.showRankOrderBreak,
     showShap: ev.hasAny,
   };
 }

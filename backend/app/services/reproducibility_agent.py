@@ -39,7 +39,7 @@ class ReproducibilityAgent(Agent):
             {"id": "score_hold_data", "name": REPRO_SCORE_HOLD},
             {"id": "score_new_data_oos", "name": REPRO_SCORE_OOS},
             {"id": "predict_new_outcome", "name": "Finalize outcomes and persist artifacts"},
-            {"id": "compare_to_original", "name": "Compare to original scores (Spearman ρ)"},
+            {"id": "compare_to_original", "name": "Compare to original scores"},
             {"id": "evaluate_threshold", "name": "Evaluate reproducibility threshold"},
         ])
 
