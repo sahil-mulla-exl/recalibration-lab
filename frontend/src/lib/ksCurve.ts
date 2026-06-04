@@ -9,6 +9,7 @@ export type KsChartPoint = {
   population_pct: number;
   cum_pos_pct: number;
   cum_neg_pct: number;
+  ks?: number;
 };
 
 /** Normalize KS curve points for the diagnostics `KsChart` (0–100 population and cumulative rates). */
@@ -17,7 +18,7 @@ export function toKsChartData(points: KsCurvePoint[]): KsChartPoint[] {
   const maxPop = Math.max(...points.map((p) => Number(p.population_pct) || 0));
   const popScale = maxPop > 0 && maxPop <= 1.01 ? 100 : 1;
   const maxCum = Math.max(
-    ...points.flatMap((p) => [Number(p.cum_pos_pct ?? 0), Number(p.cum_neg_pct ?? 0)]),
+    ...points.flatMap((p) => [Number(p.cum_pos_pct ?? 0), Number(p.cum_neg_pct ?? 0), Number(p.ks ?? 0)]),
   );
   const cumScale = maxCum > 0 && maxCum <= 1.01 ? 100 : 1;
   return [...points]
@@ -26,7 +27,16 @@ export function toKsChartData(points: KsCurvePoint[]): KsChartPoint[] {
       population_pct: Number(p.population_pct) * popScale,
       cum_pos_pct: Number(p.cum_pos_pct ?? 0) * cumScale,
       cum_neg_pct: Number(p.cum_neg_pct ?? 0) * cumScale,
+      ks: Number(p.ks ?? 0) * cumScale,
     }));
+}
+
+/** Maximum KS separation across curve points (same scale as chart data). */
+export function maxKsFromChartData(data: KsChartPoint[]): number | undefined {
+  if (!data.length) return undefined;
+  const values = data.map((p) => Number(p.ks ?? 0)).filter((v) => Number.isFinite(v));
+  if (!values.length) return undefined;
+  return Math.max(...values);
 }
 
 function fieldValue(point: KsCurvePoint, field: keyof Pick<KsCurvePoint, "ks" | "cum_pos_pct" | "cum_neg_pct">): number {

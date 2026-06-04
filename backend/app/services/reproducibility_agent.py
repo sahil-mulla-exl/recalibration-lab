@@ -297,7 +297,13 @@ class ReproducibilityAgent(Agent):
                 await self.log(
                     "Scoring uses engineered features as-is (encode_categoricals / align_columns skipped)"
                 )
-            excluded_feature_cols = {target_col, outcome_col, "predicted_outcome"}
+            excluded_feature_cols = {
+                target_col,
+                outcome_col,
+                "predicted_outcome",
+                "predict_proba",
+                "predicted_proba",
+            }
             dev_feature_cols = [c for c in engineered_dev_df.columns if c not in excluded_feature_cols]
             if hasattr(model, "feature_names_in_"):
                 model_feature_cols = [str(c) for c in list(model.feature_names_in_)]
@@ -634,17 +640,28 @@ class ReproducibilityAgent(Agent):
             "processed_oos_csv_path": processed_oos_csv_path,
         }
 
-        # Optional: score comparison vs external reference predictions file
+        # Score comparison: platform score vs prediction column selected at ingestion
         from backend.app.utils.export_scores import (
-            DEFAULT_REFERENCE_PREDICTIONS,
             build_score_comparison,
+            pick_reference_score_column,
             prepare_score_comparison_table,
+            resolve_prediction_column,
+            resolve_upload_reference_path,
         )
-        reference_path = session.get("reference_predictions_path") or DEFAULT_REFERENCE_PREDICTIONS
-        if os.path.exists(reference_path):
+        prediction_col = resolve_prediction_column(session)
+        reference_path = resolve_upload_reference_path(session, "dev")
+        ref_df = read_tabular_dataframe(reference_path) if reference_path and os.path.exists(reference_path) else None
+        if (
+            prediction_col
+            and reference_path
+            and ref_df is not None
+            and pick_reference_score_column(ref_df, prediction_col)
+        ):
             try:
                 comparison_df, comparison_summary = build_score_comparison(
-                    processed_dev_path, reference_path
+                    processed_dev_path,
+                    reference_path,
+                    reference_score_col=prediction_col,
                 )
                 comparison_df = prepare_score_comparison_table(comparison_df)
                 comparison_path = score_comparison_path(self.session_id, "dev")

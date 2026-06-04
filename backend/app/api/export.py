@@ -7,10 +7,12 @@ from fastapi import APIRouter, Body, Query
 from fastapi.responses import FileResponse, Response
 from backend.app.utils.session import get_session, session_dir, update_session
 from backend.app.utils.export_scores import (
-    DEFAULT_REFERENCE_PREDICTIONS,
     build_score_comparison,
     ensure_predicted_proba,
+    pick_reference_score_column,
     prepare_score_comparison_table,
+    resolve_prediction_column,
+    resolve_upload_reference_path,
 )
 from backend.app.utils.data_io import read_tabular_dataframe
 from backend.app.utils.processed_paths import processed_csv_path, score_comparison_path
@@ -319,26 +321,40 @@ async def export_score_comparison(
     file_format: str = Query("csv", alias="format", pattern="^(csv|xlsx)$"),
 ):
     """
-    Export merged comparison: platform score/predicted_proba vs reference predicted_proba.
+    Export merged comparison: platform score vs prediction column selected at ingestion.
     """
     session = get_session(session_id)
     if not session:
         return Response(content="Session not found", status_code=404)
 
+    prediction_col = resolve_prediction_column(session)
+    if not prediction_col:
+        return Response(
+            content="Prediction column not configured; select it on the Ingestion page.",
+            status_code=400,
+        )
+
     platform_path = _resolve_processed_path(session, dataset)
     if not platform_path or not os.path.exists(platform_path):
         return Response(content=f"Processed {dataset} data not found", status_code=404)
 
-    ref_path = (
-        reference_path
-        or session.get("reference_predictions_path")
-        or DEFAULT_REFERENCE_PREDICTIONS
-    )
-    if not os.path.exists(ref_path):
-        return Response(content=f"Reference predictions file not found: {ref_path}", status_code=404)
+    ref_path = reference_path or resolve_upload_reference_path(session, dataset)
+    if not ref_path or not os.path.exists(ref_path):
+        return Response(
+            content=f"Uploaded {dataset} data not found for score comparison",
+            status_code=404,
+        )
+    ref_df = read_tabular_dataframe(ref_path)
+    if not pick_reference_score_column(ref_df, prediction_col):
+        return Response(
+            content=f"Upload missing prediction column '{prediction_col}' selected at ingestion",
+            status_code=400,
+        )
 
     try:
-        comparison_df, summary = build_score_comparison(platform_path, ref_path)
+        comparison_df, summary = build_score_comparison(
+            platform_path, ref_path, reference_score_col=prediction_col
+        )
         comparison_df = prepare_score_comparison_table(comparison_df)
     except Exception as exc:
         return Response(content=str(exc), status_code=400)
@@ -426,10 +442,20 @@ async def export_processing_workbook(
         comparison_df = prepare_score_comparison_table(pd.read_csv(path))
     else:
         platform_path = _resolve_processed_path(session, dataset)
-        ref_path = reference_path or session.get("reference_predictions_path") or DEFAULT_REFERENCE_PREDICTIONS
-        if platform_path and os.path.exists(platform_path) and os.path.exists(ref_path):
+        prediction_col = resolve_prediction_column(session)
+        ref_path = reference_path or resolve_upload_reference_path(session, dataset)
+        if (
+            prediction_col
+            and platform_path
+            and os.path.exists(platform_path)
+            and ref_path
+            and os.path.exists(ref_path)
+            and pick_reference_score_column(read_tabular_dataframe(ref_path), prediction_col)
+        ):
             try:
-                comparison_df, _ = build_score_comparison(platform_path, ref_path)
+                comparison_df, _ = build_score_comparison(
+                    platform_path, ref_path, reference_score_col=prediction_col
+                )
                 comparison_df = prepare_score_comparison_table(comparison_df)
             except Exception:
                 comparison_df = pd.DataFrame()
@@ -450,12 +476,8 @@ async def export_processing_workbook(
 
 @router.post("/reference-predictions")
 async def set_reference_predictions(body: dict):
-    """Store path to external CSV with predicted_proba for comparison exports."""
-    session_id = body.get("session_id")
-    path = body.get("reference_path")
-    if not session_id or not path:
-        return {"error": "session_id and reference_path required"}
-    if not os.path.exists(path):
-        return {"error": f"File not found: {path}"}
-    update_session(session_id, {"reference_predictions_path": path})
-    return {"ok": True, "reference_predictions_path": path}
+    """Deprecated: score comparison uses the prediction column selected at ingestion."""
+    return {
+        "ok": False,
+        "error": "External reference files are not used; select a prediction column on the Ingestion page.",
+    }

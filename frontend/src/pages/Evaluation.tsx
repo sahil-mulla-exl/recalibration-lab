@@ -18,6 +18,13 @@ import {
 } from "@/lib/chartTheme";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AgentStepper } from "@/components/AgentStepper";
 import {
   EvaluationMetricsTable,
@@ -355,6 +362,23 @@ export default function Evaluation() {
       })).filter((c) => c.points.length > 0),
     [report, theme.series.train, theme.series.dev, theme.series.new],
   );
+  const productionKsCohorts = useMemo(
+    () => ksCohorts.filter((c) => c.key !== EVALUATION_DATA_KEYS.recalibratedOos),
+    [ksCohorts],
+  );
+  const recalKsCohort = useMemo(
+    () => ksCohorts.find((c) => c.key === EVALUATION_DATA_KEYS.recalibratedOos),
+    [ksCohorts],
+  );
+  const [productionKsKey, setProductionKsKey] = useState<string>(EVALUATION_DATA_KEYS.championHold);
+  useEffect(() => {
+    if (!productionKsCohorts.length) return;
+    if (!productionKsCohorts.some((c) => c.key === productionKsKey)) {
+      setProductionKsKey(productionKsCohorts[0].key);
+    }
+  }, [productionKsCohorts, productionKsKey]);
+  const selectedProductionKs =
+    productionKsCohorts.find((c) => c.key === productionKsKey) ?? productionKsCohorts[0];
 
   const impTable = ((report?.importance_table || []) as Array<{ feature: string; orig_importance: number; new_importance: number }>)
     .slice(0, 10);
@@ -718,13 +742,38 @@ export default function Evaluation() {
               )}
             </div>
 
-            {problemType === "classification" && showKs && ksCohorts.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {ksCohorts.map((cohort) => (
-                  <ChartCard key={cohort.key} title={`KS Curve — ${cohort.label}`} className="w-full">
-                    <KsChart data={toKsChartData(cohort.points)} />
+            {problemType === "classification" && showKs && (productionKsCohorts.length > 0 || recalKsCohort) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {productionKsCohorts.length > 0 && selectedProductionKs && (
+                  <ChartCard
+                    title="KS Curve — Production validation"
+                    subtitle="Champion model on development or new validation holdout"
+                    className="w-full"
+                    actions={
+                      productionKsCohorts.length > 1 ? (
+                        <Select value={productionKsKey} onValueChange={setProductionKsKey}>
+                          <SelectTrigger className="h-8 w-[min(100%,280px)] text-xs">
+                            <SelectValue placeholder="Select cohort" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {productionKsCohorts.map((cohort) => (
+                              <SelectItem key={cohort.key} value={cohort.key} className="text-xs">
+                                {cohort.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : undefined
+                    }
+                  >
+                    <KsChart data={toKsChartData(selectedProductionKs.points)} />
                   </ChartCard>
-                ))}
+                )}
+                {recalKsCohort && (
+                  <ChartCard title={`KS Curve — ${recalKsCohort.label}`} className="w-full">
+                    <KsChart data={toKsChartData(recalKsCohort.points)} />
+                  </ChartCard>
+                )}
               </div>
             )}
           </div>

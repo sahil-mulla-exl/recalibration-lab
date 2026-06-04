@@ -7,7 +7,7 @@ export const DIAGNOSTICS_TABS = [
   { id: "data", label: "Data Drift", benchmark: DEV },
   { id: "concept", label: "Concept Drift", benchmark: DEV },
   { id: "performance", label: "Performance Drift", benchmark: HOLD },
-  { id: "summary", label: "Summary", benchmark: HOLD },
+  { id: "summary", label: "Decision", benchmark: HOLD },
 ] as const;
 
 /** Section order when rendering combined Data Drift view (no nested tabs). */

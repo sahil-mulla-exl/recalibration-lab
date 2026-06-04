@@ -16,6 +16,7 @@ import { CalibrationChart } from "@/components/diagnostics/CalibrationChart";
 import { ChartCard } from "@/components/diagnostics/ChartCard";
 import { DecileChart } from "@/components/diagnostics/DecileChart";
 import { KsChart } from "@/components/diagnostics/KsChart";
+import { toKsChartData } from "@/lib/ksCurve";
 import { PdpChart } from "@/components/diagnostics/PdpChart";
 import { RadarPerfChart } from "@/components/diagnostics/RadarPerfChart";
 import { RocChart } from "@/components/diagnostics/RocChart";
@@ -415,13 +416,14 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
             {vis.showKsCurve && (
               <ChartCard title="KS Curve" className="w-full">
                 <KsChart
-                  data={
+                  data={toKsChartData(
                     (perf.ks_curve_new ?? []) as Array<{
                       population_pct: number;
                       cum_pos_pct: number;
                       cum_neg_pct: number;
-                    }>
-                  }
+                      ks?: number;
+                    }>,
+                  )}
                 />
               </ChartCard>
             )}
