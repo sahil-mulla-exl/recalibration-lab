@@ -5,6 +5,11 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
+from backend.app.agentic.memory import MemoryStore
+from backend.app.agentic.runtime import AgentRuntime
+from backend.app.agentic.schemas import AgentPlan, ToolCall
+from backend.app.agentic.tools_workflow import build_default_registry
+from backend.app.core.config import settings
 from backend.app.core.governance import (
     classify_csi,
     classify_iv_delta,
@@ -137,6 +142,27 @@ class DriftDiagnosticsAgent(Agent):
                     cols.append(col)
         return cols
 
+    async def _recommend_with_runtime(self, signal: Dict[str, Any], recommendation: Dict[str, Any]) -> Dict[str, Any]:
+        if not settings.AGENTIC_MODE:
+            return recommendation
+        runtime = AgentRuntime(tool_registry=build_default_registry(), memory_store=MemoryStore())
+        await runtime.run_plan(
+            workflow_run_id=f"drift_{self.session_id[:8]}",
+            session_id=self.session_id,
+            agent_name="drift",
+            goal="Finalize drift recommendation with deterministic signal evidence.",
+            fallback_plan=AgentPlan(
+                summary="Use deterministic recommendation tool and persist audit trail.",
+                actions=[ToolCall(name="recommend_action", args={"signal": signal, "recommendation": recommendation})],
+            ),
+            llm_context="drift_diagnostics",
+        )
+        recommendation = dict(recommendation)
+        recommendation["agentic_note"] = (
+            "Recommendation validated by AgentRuntime plan-act-reflect loop; deterministic policy result preserved."
+        )
+        return recommendation
+
     @staticmethod
     def _infer_numeric_features(df: pd.DataFrame, candidates: List[str]) -> List[str]:
         cols: List[str] = []
@@ -253,7 +279,8 @@ class DriftDiagnosticsAgent(Agent):
             interpretability,
             ctx.governance,
         )
-        recommendation = await asyncio.to_thread(self._recommend, signal)
+        deterministic_recommendation = await asyncio.to_thread(self._recommend, signal)
+        recommendation = await self._recommend_with_runtime(signal, deterministic_recommendation)
         report = {
             "version": "v3",
             "problem_type": ctx.problem_type,

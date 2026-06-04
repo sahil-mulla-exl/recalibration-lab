@@ -66,6 +66,9 @@ export const RCL_STATE_KEYS = [
   "rcl:diagInterim2",
   "rcl:diagFinal",
   "rcl:diagActiveTab",
+  "rcl:workflowRunId",
+  "rcl:workflowPendingHitl",
+  "rcl:workflowStatus",
 ] as const;
 
 export function clearAllSessionState() {

@@ -4,16 +4,18 @@ import math
 import time
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-from backend.app.utils.session import get_session, update_session
+from backend.app.utils.session import get_session, persist_session, update_session
 
 router = APIRouter()
 
 AGENT_REGISTRY = {
+    "inventory": ("backend.app.agentic.agents", "InventoryAgent"),
     "ingestion": ("backend.app.services.ingestion_agent", "IngestionAgent"),
     "reproducibility": ("backend.app.services.reproducibility_agent", "ReproducibilityAgent"),
     "drift": ("backend.app.services.drift_agent", "DriftDiagnosticsAgent"),
     "recalibration": ("backend.app.services.recalibration_agent", "RecalibrationAgent"),
     "evaluation": ("backend.app.services.evaluation_agent", "EvaluationAgent"),
+    "export": ("backend.app.agentic.agents", "ExportAgent"),
 }
 
 
@@ -34,6 +36,7 @@ class EventBufferQueue:
         if info is None:
             return
         info.setdefault("events", []).append(item)
+        persist_session(self.session_id)
 
     async def put(self, item) -> None:
         if item is not None:
@@ -84,6 +87,7 @@ def _set_agent_run(session_id: str, agent_name: str, run_info: dict) -> None:
     if not session:
         return
     session.setdefault("agent_runs", {})[agent_name] = run_info
+    persist_session(session_id)
 
 
 @router.post("/{agent_name}/run")
@@ -129,10 +133,12 @@ async def run_agent(agent_name: str, body: dict):
             if info is not None:
                 info["status"] = "completed"
                 info["result"] = result
+                persist_session(session_id)
         except Exception as e:
             info = _get_run_info(session_id, agent_name)
             if info is not None:
                 info["status"] = "failed"
+                persist_session(session_id)
             await queue.put({
                 "agent": agent_name,
                 "event_type": "failed",

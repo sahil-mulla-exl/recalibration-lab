@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class AgentEvent(BaseModel):
     agent: str
-    event_type: str  # 'started','task','progress','log','output','completed','failed'
+    event_type: str  # task lifecycle + agentic events: plan/tool_call/reflection/handoff/human_input_required
     task_id: Optional[str] = None
     task_name: Optional[str] = None
     task_status: Optional[str] = None  # 'pending','running','completed','failed'

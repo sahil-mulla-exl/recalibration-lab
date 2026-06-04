@@ -19,3 +19,6 @@ openpyxl>=3.1.5
 pydantic>=2.11.7
 matplotlib>=3.10.7
 Pillow>=11.3.0
+langgraph>=1.1.6
+langchain>=1.2.15
+langchain-core>=1.4.0

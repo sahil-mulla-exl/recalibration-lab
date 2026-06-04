@@ -112,7 +112,14 @@ export const configureIngestionVariables = (
   });
 
 // ── Agents ─────────────────────────────────────────────────────────────────────
-export type AgentName = "ingestion" | "reproducibility" | "drift" | "recalibration" | "evaluation";
+export type AgentName =
+  | "inventory"
+  | "ingestion"
+  | "reproducibility"
+  | "drift"
+  | "recalibration"
+  | "evaluation"
+  | "export";
 
 export const runAgent = (session_id: string, agent: AgentName, params?: Record<string, unknown>) =>
   apiFetch<{ run_id?: string; status?: string; error?: string }>(`/agents/${agent}/run`, {
@@ -135,6 +142,69 @@ export const getAgentStatus = (session_id: string, agent: AgentName) =>
 
 export const agentEventsUrl = (session_id: string, agent: AgentName) =>
   `${BASE}/agents/${agent}/events?session_id=${session_id}`;
+
+export type WorkflowMode = "supervised" | "autonomous";
+export type WorkflowStatus = "running" | "waiting_human" | "completed" | "failed";
+export type WorkflowGate =
+  | "inventory_confirm"
+  | "ingestion_mapping"
+  | "diagnostic_action"
+  | "recalibration_config"
+  | "promotion";
+
+export type WorkflowHitlRequest = {
+  gate: WorkflowGate;
+  recommendation: Record<string, unknown>;
+  allowed_actions: string[];
+  context_ref?: string;
+};
+
+export const startWorkflowRun = (session_id: string, mode: WorkflowMode = "supervised") =>
+  apiFetch<{ run_id?: string; status?: WorkflowStatus; error?: string }>("/workflow/runs", {
+    method: "POST",
+    body: JSON.stringify({ session_id, mode }),
+  }).then((res) => {
+    if (res?.error) {
+      throw new Error(res.error);
+    }
+    return res as { run_id: string; status: WorkflowStatus };
+  });
+
+export const getWorkflowRunStatus = (run_id: string) =>
+  apiFetch<{
+    run_id: string;
+    status: WorkflowStatus;
+    pending_hitl?: WorkflowHitlRequest | null;
+    current_node?: string;
+    result?: Record<string, unknown> | null;
+    error?: string | null;
+  }>(`/workflow/runs/${run_id}`);
+
+export const getWorkflowPendingHitl = (run_id: string) =>
+  apiFetch<{ status: WorkflowStatus; pending_hitl: WorkflowHitlRequest | null }>(
+    `/workflow/runs/${run_id}/pending-hitl`,
+  );
+
+export const resumeWorkflowRun = (
+  run_id: string,
+  payload: {
+    gate: WorkflowGate;
+    decision: string;
+    rationale: string;
+    overrides?: Record<string, unknown>;
+  },
+) =>
+  apiFetch<{ ok?: boolean; status?: WorkflowStatus; error?: string }>(`/workflow/runs/${run_id}/resume`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then((res) => {
+    if (res?.error) {
+      throw new Error(res.error);
+    }
+    return res as { ok: boolean; status: WorkflowStatus };
+  });
+
+export const workflowEventsUrl = (run_id: string) => `${BASE}/workflow/runs/${run_id}/events`;
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 export const getDriftReport = (session_id: string) =>

@@ -280,6 +280,7 @@ class LitellmUsageConfig:
 
 
 class Settings:
+    AGENTIC_MODE: bool = str(os.getenv("AGENTIC_MODE", "false")).strip().lower() in {"1", "true", "yes", "on"}
     LLM_USE_GATEWAY: bool = LLM_USE_GATEWAY
     LLM_GATEWAY_URL: Optional[str] = LLM_GATEWAY_URL
     LLM_GATEWAY_VIRTUAL_KEY: Optional[str] = LLM_GATEWAY_VIRTUAL_KEY

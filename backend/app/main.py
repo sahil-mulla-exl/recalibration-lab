@@ -43,6 +43,7 @@ from backend.app.api.governance import router as governance_router
 from backend.app.api.recalibration import router as recalibration_router
 from backend.app.api.evaluation import router as evaluation_router
 from backend.app.api.export import router as export_router
+from backend.app.api.workflow_runs import router as workflow_runs_router
 
 app.include_router(session_router, prefix="/api/session")
 app.include_router(inventory_router, prefix="/api/inventory")
@@ -54,6 +55,7 @@ app.include_router(governance_router, prefix="/api/governance")
 app.include_router(recalibration_router, prefix="/api/recalibration")
 app.include_router(evaluation_router, prefix="/api/evaluation")
 app.include_router(export_router, prefix="/api/export")
+app.include_router(workflow_runs_router, prefix="/api/workflow")
 
 @app.get("/api/healthz")
 async def health():

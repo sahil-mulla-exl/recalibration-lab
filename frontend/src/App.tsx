@@ -30,6 +30,7 @@ import RecalibrationProgress from "@/pages/RecalibrationProgress";
 import Evaluation from "@/pages/Evaluation";
 import ExportPage from "@/pages/Export";
 import NotFound from "@/pages/not-found";
+import { WorkflowCockpit } from "@/components/WorkflowCockpit";
 
 const queryClient = new QueryClient();
 
@@ -282,6 +283,7 @@ function AppInner() {
       }}
     >
       <Shell step={step}>
+        <WorkflowCockpit sessionId={sessionId} />
         <Switch>
           <Route path="/" component={ModelInventory} />
           <Route path="/ingestion" component={Ingestion} />
