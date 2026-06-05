@@ -129,21 +129,24 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
       : ((report.selected_metrics as string[]) ?? []);
   const vis = perfDriftVisibility(inventorySelection, problemType);
 
-  const radarRows = [
-    vis.showAuc ? { metric: "AUC", dev: Number(perf.auc_dev ?? 0), current: Number(perf.auc_new ?? 0) } : null,
-    vis.showKs ? { metric: "KS", dev: Number(perf.ks_dev ?? 0), current: Number(perf.ks_new ?? 0) } : null,
-    vis.showGini ? { metric: "Gini", dev: Number(perf.gini_dev ?? 0), current: Number(perf.gini_new ?? 0) } : null,
+  const discriminationMetricRows = [
+    vis.showAuc ? { metric: "AUC", dev: Number(perf.auc_dev ?? 0), current: Number(perf.auc_new ?? 0), higherIsBetter: true } : null,
+    vis.showKs ? { metric: "KS", dev: Number(perf.ks_dev ?? 0), current: Number(perf.ks_new ?? 0), higherIsBetter: true } : null,
+    vis.showGini ? { metric: "Gini", dev: Number(perf.gini_dev ?? 0), current: Number(perf.gini_new ?? 0), higherIsBetter: true } : null,
     vis.showAuc
-      ? { metric: "AUC-PR", dev: Number(perf.auc_pr_dev ?? 0), current: Number(perf.auc_pr_new ?? 0) }
+      ? { metric: "AUC-PR", dev: Number(perf.auc_pr_dev ?? 0), current: Number(perf.auc_pr_new ?? 0), higherIsBetter: true }
       : null,
     vis.showCalibration
       ? {
           metric: "Calibration Error",
           dev: Number(perf.cal_error_dev ?? 0),
           current: Number(perf.cal_error_new ?? 0),
+          higherIsBetter: false,
         }
       : null,
-  ].filter((row): row is { metric: string; dev: number; current: number } => row != null);
+  ].filter((row): row is { metric: string; dev: number; current: number; higherIsBetter: boolean } => row != null);
+
+  const radarRows = discriminationMetricRows.map(({ metric, dev, current }) => ({ metric, dev, current }));
 
   if (!vis.hasAny) {
     return (
@@ -415,6 +418,45 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
           {vis.showScorePsi && (
           <ChartCard title="Score PSI" subtitle={perfCompareSubtitle()} conclusion={psiConclusion} className="w-full md:w-1/2">
             <div className="text-3xl font-semibold text-foreground">{scorePsi.toFixed(3)}</div>
+          </ChartCard>
+          )}
+          {discriminationMetricRows.length > 0 && (
+          <ChartCard title="Discrimination metrics" subtitle={perfCompareSubtitle()}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Metric</TableHead>
+                  <TableHead className="text-right">{perfBaselineShortLabel()}</TableHead>
+                  <TableHead className="text-right">{perfNewShortLabel()}</TableHead>
+                  <TableHead className="text-right">{perfDeltaShortLabel()}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {discriminationMetricRows.map(({ metric, dev, current, higherIsBetter }) => {
+                  const delta = current - dev;
+                  const deltaLabel = metric === "Calibration Error"
+                    ? `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} pp`
+                    : `${delta >= 0 ? "+" : ""}${delta.toFixed(4)}`;
+                  return (
+                    <TableRow key={metric}>
+                      <TableCell className="font-medium">{metric}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {metric === "Calibration Error" ? `${dev.toFixed(2)}%` : dev.toFixed(4)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {metric === "Calibration Error" ? `${current.toFixed(2)}%` : current.toFixed(4)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-muted-foreground">
+                        {deltaLabel}
+                        {!higherIsBetter && Math.abs(delta) > 0.0001 && (
+                          <span className="sr-only">{delta > 0 ? " worse" : " better"}</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </ChartCard>
           )}
           <div className="space-y-4 min-w-0">

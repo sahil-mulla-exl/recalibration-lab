@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CategoricalDriftRow } from "@/components/diagnostics/CategoricalDriftRow";
+import { CardinalityDriftTable } from "@/components/diagnostics/CardinalityDriftTable";
 import { ChartCard } from "@/components/diagnostics/ChartCard";
 import { CsiRankedChart } from "@/components/diagnostics/CsiRankedChart";
 import { DistributionExplorerCharts } from "@/components/diagnostics/DistributionExplorerCharts";
@@ -60,7 +60,19 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
     string,
     { train_missing_pct?: number; new_missing_pct?: number; delta_pp?: number; severity?: "critical" | "moderate" | "stable" }
   >;
-  const cardinality = (data.cardinality_drift ?? {}) as Record<string, { train_categories?: string[]; new_categories?: string[]; new_only?: string[]; lost?: string[] }>;
+  const cardinality = (data.cardinality_drift ?? {}) as Record<
+    string,
+    {
+      train_categories?: string[];
+      new_categories?: string[];
+      new_only?: string[];
+      lost?: string[];
+      train_count?: number;
+      new_count?: number;
+      new_only_count?: number;
+      lost_count?: number;
+    }
+  >;
   const desc = (data.descriptive_stats ?? {}) as Record<string, unknown>;
 
   const csiRows = useMemo(
@@ -175,12 +187,19 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
   };
   const targetChartTraining = trainingRate;
   const targetChartNew = newRate;
-  const cardinalityRows = Object.entries(cardinality);
-  const cardinalityCounts = {
-    newCategory: cardinalityRows.filter(([, vals]) => (vals.new_only ?? []).length > 0).length,
-    lostCategory: cardinalityRows.filter(([, vals]) => (vals.lost ?? []).length > 0).length,
-    stable: cardinalityRows.filter(([, vals]) => (vals.new_only ?? []).length === 0 && (vals.lost ?? []).length === 0).length,
-  };
+  const cardinalityRows = useMemo(
+    () =>
+      Object.entries(cardinality)
+        .map(([feature, vals]) => ({
+          feature,
+          trainCount: Number(vals.train_count ?? (vals.train_categories ?? []).length),
+          newCount: Number(vals.new_count ?? (vals.new_categories ?? []).length),
+          newOnly: vals.new_only ?? [],
+          lost: vals.lost ?? [],
+        }))
+        .sort((a, b) => a.feature.localeCompare(b.feature)),
+    [cardinality],
+  );
 
   if (!hasDataDriftConfig && !showTarget) {
     return (
@@ -247,32 +266,7 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
 
         <div className="space-y-3">
           <ChartCard title="Cardinality change — categorical features" subtitle={`New/lost category monitoring — raw ${driftCompareSubtitle()}`}>
-            <div className="flex flex-wrap items-center gap-2 text-xs mb-3">
-              <span className="px-2 py-1 rounded border bg-red-500/10 border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.newCategory} New Category
-              </span>
-              <span className="px-2 py-1 rounded border bg-amber-500/10 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.lostCategory} Lost Category
-              </span>
-              <span className="px-2 py-1 rounded border bg-emerald-500/10 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-300 font-semibold uppercase tracking-wide">
-                {cardinalityCounts.stable} Stable
-              </span>
-              <span className="px-2 py-1 rounded border bg-blue-500/10 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wide">
-                Auto-Flagged
-              </span>
-            </div>
-            <div className="space-y-2">
-              {cardinalityRows.map(([feature, vals]) => (
-                <CategoricalDriftRow
-                  key={feature}
-                  feature={feature}
-                  trainCount={Number(vals.train_count ?? (vals.train_categories ?? []).length)}
-                  newCount={Number(vals.new_count ?? (vals.new_categories ?? []).length)}
-                  newOnly={vals.new_only ?? []}
-                  lost={vals.lost ?? []}
-                />
-              ))}
-            </div>
+            <CardinalityDriftTable rows={cardinalityRows} />
           </ChartCard>
           <ChartCard title="Missing Rate Drift" subtitle="Feature-wise table with severity filter">
             <MissingRateTable rows={missingRows} />

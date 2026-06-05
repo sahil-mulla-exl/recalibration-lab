@@ -427,7 +427,7 @@ class DriftDiagnosticsAgent(Agent):
             }
 
         raw_common = [c for c in ctx.feature_cols if c in ctx.raw_train_df.columns and c in ctx.raw_new_df.columns]
-        categorical_cols = self._infer_categorical_features_strict(ctx.raw_train_df, raw_common)
+        categorical_cols = self._infer_categorical_features(ctx.raw_train_df, raw_common)
         cardinality = {
             col: compute_cardinality_drift(ctx.raw_train_df[col], ctx.raw_new_df[col])
             for col in categorical_cols
