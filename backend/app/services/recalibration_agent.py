@@ -20,7 +20,7 @@ from backend.app.utils.model_helpers import (
 )
 from backend.app.utils.drift_metrics import compute_auc, compute_rmse, compute_mae, compute_r2
 from backend.app.utils.data_io import read_tabular_dataframe
-from backend.app.utils.oot_data import load_oot_dataframe
+from backend.app.utils.oot_data import load_oos_evaluation_dataframe, load_oot_dataframe
 from backend.app.config.agent_task_labels import RECAL_SCORE_OOT
 
 logger = logging.getLogger(__name__)
@@ -741,26 +741,48 @@ class RecalibrationAgent(Agent):
                 f"Recalibrated scores on combined training data written: {processed_recal_train_csv_path}"
             )
 
-        # Task 6: score_oot
+        # Task 6: score New Test Data (ingestion new_data_oos) for evaluation — not Existing Test holdout.
         await self.task_started("score_oot")
         await asyncio.sleep(0.6)
+        from backend.app.config.datasets import NEW_VALIDATION
+
+        oos_eval_df, oos_eval_source = load_oos_evaluation_dataframe(
+            session, data_dir, prefer_processed=True
+        )
+        oos_outcome_col = _train_label_col(oos_eval_df)
+        if oos_outcome_col not in oos_eval_df.columns:
+            await self.task_failed(
+                "score_oot",
+                f"{NEW_VALIDATION} missing outcome/target columns for scoring",
+            )
+            await self.failed(f"{NEW_VALIDATION} missing outcome/target columns for scoring")
+            return {}
+        oos_feature_cols = [c for c in list(X_train.columns) if c in oos_eval_df.columns]
+        if not oos_feature_cols:
+            await self.task_failed("score_oot", f"No overlapping features on {NEW_VALIDATION}")
+            await self.failed(f"No overlapping features on {NEW_VALIDATION}")
+            return {}
+        X_oos_eval, y_oos_eval = _align_processed_to_columns(
+            oos_eval_df, list(X_train.columns), oos_outcome_col
+        )
         if is_regression:
-            oot_preds = final_model.predict(X_oot)
-            oot_rmse = compute_rmse(y_oot, oot_preds)
-            oot_mae = compute_mae(y_oot, oot_preds)
-            oot_r2 = compute_r2(y_oot, oot_preds)
+            oos_preds = final_model.predict(X_oos_eval)
+            oot_rmse = compute_rmse(y_oos_eval, oos_preds)
+            oot_mae = compute_mae(y_oos_eval, oos_preds)
+            oot_r2 = compute_r2(y_oos_eval, oos_preds)
             oot_auc = None
-            await self.log(f"OOT RMSE: {oot_rmse:.4f}")
-            await self.log(f"OOT MAE: {oot_mae:.4f}")
-            await self.log(f"OOT R2: {oot_r2:.4f}")
-            await self.task_completed("score_oot", f"OOT RMSE={oot_rmse:.4f}, R2={oot_r2:.4f}")
+            await self.log(f"{NEW_VALIDATION} RMSE: {oot_rmse:.4f}")
+            await self.log(f"{NEW_VALIDATION} MAE: {oot_mae:.4f}")
+            await self.log(f"{NEW_VALIDATION} R2: {oot_r2:.4f}")
+            await self.task_completed("score_oot", f"{NEW_VALIDATION} RMSE={oot_rmse:.4f}, R2={oot_r2:.4f}")
         else:
-            oot_preds = final_model.predict_proba(X_oot)[:, 1]
-            oot_auc = compute_auc(y_oot, oot_preds)
+            oos_preds = final_model.predict_proba(X_oos_eval)[:, 1]
+            oot_auc = compute_auc(y_oos_eval, oos_preds)
             oot_rmse = oot_mae = oot_r2 = None
-            await self.log(f"OOT AUC: {oot_auc:.4f}")
-            await self.log(f"OOT target rate: {y_oot.mean()*100:.1f}%")
-            await self.task_completed("score_oot", f"OOT AUC = {oot_auc:.4f}")
+            await self.log(f"{NEW_VALIDATION} AUC: {oot_auc:.4f}")
+            await self.log(f"{NEW_VALIDATION} target rate: {y_oos_eval.mean()*100:.1f}%")
+            await self.task_completed("score_oot", f"{NEW_VALIDATION} AUC = {oot_auc:.4f}")
+        oot_preds = oos_preds
 
         # Task 7: serialize_new_model
         await self.task_started("serialize_new_model")
@@ -774,10 +796,10 @@ class RecalibrationAgent(Agent):
         await self.log(f"Model serialized to {new_model_path}")
         await self.log(f"File size: {model_size_kb:.1f} KB")
 
-        # Save OOT scores to backend/data/processed_data (score + new_score + predicted_proba)
+        # Persist recalibrated scores on New Test Data (separate from processed_oos_path).
         from backend.app.utils.processed_paths import persist_processed_dataset
 
-        oot_scores_df = oot_df.copy()
+        oot_scores_df = oos_eval_df.copy()
         if "score" not in oot_scores_df.columns:
             orig_col = session.get("processed_score_column") or "score"
             if orig_col in oot_scores_df.columns:
@@ -786,12 +808,12 @@ class RecalibrationAgent(Agent):
             persist_processed_dataset,
             oot_scores_df,
             self.session_id,
-            "oot",
+            "recal_oos",
             new_scores=oot_preds,
         )
         oot_scores_path = oot_paths["parquet"]
         oot_scores_csv_path = oot_paths["csv"]
-        await self.log(f"OOT predictions written: {oot_scores_csv_path}")
+        await self.log(f"{NEW_VALIDATION} recalibrated predictions written: {oot_scores_csv_path}")
 
         processed_hold_path = session.get("processed_hold_path")
         processed_hold_csv_path = None
@@ -834,8 +856,10 @@ class RecalibrationAgent(Agent):
             "dev_outcome_column_used": dev_outcome_col,
             "train_rows": len(X_train),
             "processed_recal_train_path": processed_recal_train_path,
-            "oot_rows": len(oot_df),
-            "oot_source": oot_source,
+            "oot_rows": len(oos_eval_df),
+            "oot_source": oos_eval_source,
+            "hold_validation_rows": len(oot_df),
+            "hold_validation_source": oot_source,
             "tuning_skipped": skip_tuning,
             "selected_action": selected_action,
             "seeded_from_uploaded_model": seeded_from_uploaded_model,

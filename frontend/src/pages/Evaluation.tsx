@@ -45,6 +45,13 @@ import {
   type EvaluationCohortKey,
 } from "@/config/evaluation";
 import { buildEvaluationRadarRows, type RadarChartRow } from "@/lib/evaluationRadar";
+import {
+  GenAiSectionInsight,
+  GenAiTabSummary,
+  pickGenAiInsight,
+  useParsedGenAiInsight,
+} from "@/components/diagnostics/GenAiInsightsPanel";
+import { pickEvaluationSection } from "@/lib/genaiInsightParse";
 import { KsChart } from "@/components/diagnostics/KsChart";
 import { toKsChartData } from "@/lib/ksCurve";
 import type { ChartTheme } from "@/lib/chartTheme";
@@ -395,6 +402,10 @@ export default function Evaluation() {
   const showShapImportance =
     showMetricsForProblem &&
     (showFeatureImportance || showXgbNativeImportance || Boolean(shapImportance?.available));
+  const evalGenAi = pickGenAiInsight(report ?? undefined, "evaluation");
+  const evalGenAiParsed = useParsedGenAiInsight(evalGenAi);
+  const llmDeploymentInsight = pickEvaluationSection(evalGenAiParsed, "recommended");
+  const showLlmDeployment = evalGenAi?.status === "ok" && Boolean(llmDeploymentInsight?.trim());
   const evaluationMetricRows = useMemo((): EvaluationMetricRow[] => {
     if (!report) return [];
     const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
@@ -633,7 +644,12 @@ export default function Evaluation() {
       {done && report && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
 
-          <RecommendBanner report={report} problemType={problemType} />
+          <GenAiTabSummary insight={evalGenAi} title="AI evaluation summary" className="mb-4" />
+          {showLlmDeployment ? (
+            <GenAiSectionInsight text={llmDeploymentInsight} className="mb-4" />
+          ) : (
+            <RecommendBanner report={report} problemType={problemType} />
+          )}
           {SHOW_POLICY_GUARDRAILS && <PolicyGuardrailsCard guardrails={guardrails} />}
 
           {showMetricsForProblem ? (
@@ -766,9 +782,11 @@ export default function Evaluation() {
                 )}
               </div>
             )}
+            <GenAiSectionInsight text={pickEvaluationSection(evalGenAiParsed, "metrics")} className="mt-2" />
           </div>
 
           {problemType === "classification" && showRankOrderBreak && report && (
+            <>
             <EvaluationRankOrderBreak
               report={report}
               theme={theme}
@@ -778,6 +796,8 @@ export default function Evaluation() {
                 [EVALUATION_DATA_KEYS.recalibratedOos]: theme.series.new,
               }}
             />
+            <GenAiSectionInsight text={pickEvaluationSection(evalGenAiParsed, "rank")} />
+            </>
           )}
 
           {/* Lift chart */}
@@ -810,6 +830,9 @@ export default function Evaluation() {
               </ChartFrame>
             </ChartCard>
           )}
+          {problemType === "classification" && showLift && liftData.length > 0 && (
+            <GenAiSectionInsight text={pickEvaluationSection(evalGenAiParsed, "lift")} />
+          )}
 
           {showXgbNativeImportance && (
             <EvaluationXgbImportance payload={xgboostImportance} />
@@ -817,6 +840,10 @@ export default function Evaluation() {
 
           {showShapImportance && (
             <EvaluationShapImportance payload={shapImportance} />
+          )}
+
+          {(showXgbNativeImportance || showShapImportance) && (
+            <GenAiSectionInsight text={pickEvaluationSection(evalGenAiParsed, "importance")} />
           )}
 
           <div className="flex justify-end">

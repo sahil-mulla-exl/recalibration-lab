@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 
 import { Card } from "@/components/ui/card";
 
+import {
+  GenAiInsightsPanel,
+  GenAiTabSummary,
+  pickGenAiInsight,
+} from "@/components/diagnostics/GenAiInsightsPanel";
 import { SignalGrid } from "@/components/diagnostics/SignalGrid";
 import { DIAGNOSTIC_ACTION_MESSAGES, DIAGNOSTIC_FINAL_ACTIONS } from "@/config/diagnostics";
 
@@ -24,6 +29,8 @@ export type FinalDecisionOptions = {
 type FinalHitlPanelProps = {
 
   recommendation: { action?: DiagnosticActionId; rationale?: string };
+
+  report?: Record<string, unknown>;
 
   signals?: Record<string, unknown>;
 
@@ -49,6 +56,8 @@ export function FinalHitlPanel({
 
   recommendation,
 
+  report,
+
   signals,
 
   modelClass,
@@ -66,6 +75,11 @@ export function FinalHitlPanel({
   const defaultAction = allowedActions.includes(recommended) ? recommended : "recal_with_hp_opt";
 
   const [action, setAction] = useState<DiagnosticActionId>(defaultAction);
+  const llmDecision = pickGenAiInsight(report, "recalibration_decision");
+  const llmRationale =
+    llmDecision?.status === "ok" && llmDecision.text?.trim()
+      ? llmDecision.text.trim()
+      : recommendation.rationale ?? "Confirmed diagnostic decision";
 
   const descriptions: Record<DiagnosticActionId, string> = {
     no_action: "Accept current model performance and continue unchanged.",
@@ -90,14 +104,15 @@ export function FinalHitlPanel({
         proceeding to the Recalibration Agent.
       </p>
 
+      <GenAiTabSummary insight={llmDecision} title="AI decision summary" className="mt-4" />
+
       <SignalGrid signals={signals} embedded className="mt-4" />
 
-      {recommendation.rationale ? (
-        <div className="mt-4 rounded-lg border border-orange-200 dark:border-orange-800/50 bg-orange-50/60 dark:bg-orange-950/20 px-3 py-2.5 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-          <span className="font-semibold text-orange-700 dark:text-orange-300">AI recommendation. </span>
-          {recommendation.rationale}
-        </div>
-      ) : null}
+      <GenAiInsightsPanel
+        title="AI recommendation"
+        insight={llmDecision}
+        className="mt-4"
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
 
@@ -195,7 +210,7 @@ export function FinalHitlPanel({
         <Button
 
           onClick={() => {
-            onConfirm(action, recommendation.rationale ?? "Confirmed diagnostic decision");
+            onConfirm(action, llmRationale);
           }}
 
         >

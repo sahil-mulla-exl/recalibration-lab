@@ -9,6 +9,13 @@ import { MonotonicityChart } from "@/components/diagnostics/MonotonicityChart";
 
 import { driftBaselineLabel, driftCompareSubtitle, INGESTION_DATASETS } from "@/config/datasets";
 import { hasInventoryMetric, INVENTORY_CONCEPT_DRIFT } from "@/config/inventoryMetrics";
+import {
+  GenAiSectionInsight,
+  GenAiTabSummary,
+  pickGenAiInsight,
+  useParsedGenAiInsight,
+} from "@/components/diagnostics/GenAiInsightsPanel";
+import { pickConceptSection } from "@/lib/genaiInsightParse";
 import { Card } from "@/components/ui/card";
 
 import { UnivariateAucChart } from "@/components/diagnostics/UnivariateAucChart";
@@ -181,8 +188,12 @@ export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTa
     );
   }
 
+  const conceptGenAi = pickGenAiInsight(report, "concept_drift");
+  const conceptGenAiParsed = useParsedGenAiInsight(conceptGenAi);
+
   return (
     <div className="space-y-4">
+      <GenAiTabSummary insight={conceptGenAi} title="AI concept drift summary" />
       <div className="space-y-4">
           {showIv && (
           <ChartCard
@@ -232,7 +243,7 @@ export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTa
           <ChartCard
             title="Univariate Variable AUC"
 
-            subtitle={`${INGESTION_DATASETS.hold_data.label} vs ${INGESTION_DATASETS.new_data.label} — raw variable ROC-AUC (no model fit)`}
+            subtitle={`${driftCompareSubtitle()} — raw variable ROC-AUC (no model fit)`}
 
             actions={(
 
@@ -242,7 +253,7 @@ export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTa
 
                 <select className="h-8 rounded border px-2 bg-background" value={aucSort} onChange={(e) => setAucSort(e.target.value as "rank" | "delta")}>
 
-                  <option value="rank">AUC rank ({INGESTION_DATASETS.hold_data.label})</option>
+                  <option value="rank">AUC rank ({driftBaselineLabel()})</option>
 
                   <option value="delta">AUC decline (worst first)</option>
 
@@ -268,14 +279,16 @@ export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTa
 
             <UnivariateAucChart
               rows={aucRows}
-              baselineLabel={INGESTION_DATASETS.hold_data.label}
-              compareLabel={INGESTION_DATASETS.new_data.label}
+              baselineLabel={driftBaselineLabel()}
+              compareLabel={INGESTION_DATASETS.new_data_oos.label}
             />
           </ChartCard>
           )}
+          <GenAiSectionInsight text={pickConceptSection(conceptGenAiParsed, "iv")} />
       </div>
 
         {showWoe && (
+        <>
         <ChartCard
           title="Bivariate relationship"
           subtitle={
@@ -320,6 +333,8 @@ export function ConceptDriftTab({ report, selectedMetrics = [] }: ConceptDriftTa
           />
 
         </ChartCard>
+        <GenAiSectionInsight text={pickConceptSection(conceptGenAiParsed, "monotonicity")} />
+        </>
         )}
     </div>
   );

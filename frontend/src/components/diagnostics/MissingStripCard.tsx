@@ -15,7 +15,7 @@ export function MissingStripCard({ feature, trainMissingPct, newMissingPct, delt
     <Card className="p-3">
       <div className="text-xs font-medium">{feature}</div>
       <div className="text-xs text-muted-foreground mt-1">
-        {INGESTION_DATASETS.dev_data.label} {trainMissingPct.toFixed(3)}% → {INGESTION_DATASETS.new_data.label} {newMissingPct.toFixed(3)}%
+        {INGESTION_DATASETS.dev_data.label} {trainMissingPct.toFixed(3)}% → {INGESTION_DATASETS.new_data_oos.label} {newMissingPct.toFixed(3)}%
       </div>
       <div className="flex items-center justify-between mt-2">
         <div className="text-sm font-semibold">{deltaPp >= 0 ? "+" : ""}{deltaPp.toFixed(3)} pp</div>

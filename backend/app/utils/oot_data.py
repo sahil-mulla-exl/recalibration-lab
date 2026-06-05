@@ -93,10 +93,6 @@ def load_oos_evaluation_dataframe(
     if oos_df is not None:
         return oos_df, "uploaded_oos_raw"
 
-    hold_df = load_hold_dataframe(session, data_dir)
-    if hold_df is not None:
-        return hold_df.copy(), "hold_fallback_for_oos"
-
     raise FileNotFoundError(
-        "New Test Data is required for evaluation. Upload new_data_oos or run data processing."
+        "New Test Data is required. Upload new_data_oos on ingestion or run data processing."
     )

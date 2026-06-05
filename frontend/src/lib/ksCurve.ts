@@ -21,23 +21,30 @@ export function toKsChartData(points: KsCurvePoint[]): KsChartPoint[] {
     ...points.flatMap((p) => [Number(p.cum_pos_pct ?? 0), Number(p.cum_neg_pct ?? 0), Number(p.ks ?? 0)]),
   );
   const cumScale = maxCum > 0 && maxCum <= 1.01 ? 100 : 1;
+  const ksScale = cumScale === 1 && maxCum > 1.01 ? 100 : cumScale;
   return [...points]
     .sort((a, b) => a.population_pct - b.population_pct)
     .map((p) => ({
       population_pct: Number(p.population_pct) * popScale,
       cum_pos_pct: Number(p.cum_pos_pct ?? 0) * cumScale,
       cum_neg_pct: Number(p.cum_neg_pct ?? 0) * cumScale,
-      ks: Number(p.ks ?? 0) * cumScale,
+      ks: Number(p.ks ?? 0) * ksScale,
     }));
 }
 
 /** Population % at maximum KS separation (for vertical reference line). */
+function ksSeparationAtPoint(p: KsChartPoint): number {
+  const fromKs = Number(p.ks ?? 0);
+  const fromCum = Math.abs(Number(p.cum_pos_pct ?? 0) - Number(p.cum_neg_pct ?? 0));
+  return Math.max(fromKs, fromCum);
+}
+
 export function ksMaxPopulationPct(data: KsChartPoint[]): number | undefined {
   if (!data.length) return undefined;
   let bestKs = -1;
   let pop = 0;
   for (const p of data) {
-    const ks = Number(p.ks ?? 0);
+    const ks = ksSeparationAtPoint(p);
     if (ks > bestKs) {
       bestKs = ks;
       pop = Number(p.population_pct);
@@ -49,7 +56,7 @@ export function ksMaxPopulationPct(data: KsChartPoint[]): number | undefined {
 /** Maximum KS separation across curve points (same scale as chart data). */
 export function maxKsFromChartData(data: KsChartPoint[]): number | undefined {
   if (!data.length) return undefined;
-  const values = data.map((p) => Number(p.ks ?? 0)).filter((v) => Number.isFinite(v));
+  const values = data.map((p) => ksSeparationAtPoint(p)).filter((v) => Number.isFinite(v));
   if (!values.length) return undefined;
   return Math.max(...values);
 }

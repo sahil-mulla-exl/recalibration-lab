@@ -631,6 +631,14 @@ class EvaluationAgent(Agent):
             "log_path": log_path,
         }
 
+        await self.log("Generating AI evaluation insights…")
+        try:
+            from backend.app.services.genai_insights_service import enrich_evaluation_result
+
+            result["genai_insights"] = await enrich_evaluation_result(result)
+        except Exception as exc:
+            await self.log(f"AI evaluation insights skipped: {exc}")
+
         update_session(self.session_id, {
             "evaluation_result": result,
             "log_path": log_path,

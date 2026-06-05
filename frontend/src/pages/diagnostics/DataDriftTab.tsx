@@ -10,6 +10,13 @@ import { DescriptiveStatsCard } from "@/components/data-processing/DescriptiveSt
 import { TargetEventRateChart } from "@/components/diagnostics/TargetEventRateChart";
 import { driftBaselineLabel, driftCompareSubtitle } from "@/config/datasets";
 import { hasInventoryMetric, INVENTORY_DATA_DRIFT } from "@/config/inventoryMetrics";
+import {
+  GenAiSectionInsight,
+  GenAiTabSummary,
+  pickGenAiInsight,
+  useParsedGenAiInsight,
+} from "@/components/diagnostics/GenAiInsightsPanel";
+import { pickDataSection } from "@/lib/genaiInsightParse";
 import { Card } from "@/components/ui/card";
 
 type DataDriftTabProps = {
@@ -186,8 +193,12 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
     );
   }
 
+  const dataGenAi = pickGenAiInsight(report, "data_drift");
+  const dataGenAiParsed = useParsedGenAiInsight(dataGenAi);
+
   return (
     <div className="space-y-4">
+      <GenAiTabSummary insight={dataGenAi} title="AI data drift summary" />
       {hasDataDriftConfig && (
       <>
       <ChartCard
@@ -232,6 +243,7 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
         >
           <DescriptiveStatsCard rows={rawRows} />
         </ChartCard>
+        <GenAiSectionInsight text={pickDataSection(dataGenAiParsed, "descriptive")} />
 
         <div className="space-y-3">
           <ChartCard title="Cardinality change — categorical features" subtitle={`New/lost category monitoring — raw ${driftCompareSubtitle()}`}>
@@ -266,10 +278,12 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
             <MissingRateTable rows={missingRows} />
           </ChartCard>
         </div>
+        <GenAiSectionInsight text={pickDataSection(dataGenAiParsed, "cardinality")} />
       </>
       )}
 
           {showTarget && (
+          <>
           <ChartCard
             title="Target Drift"
             subtitle={`Event rate comparison — ${driftCompareSubtitle()}`}
@@ -309,6 +323,8 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
               />
             </div>
           </ChartCard>
+          <GenAiSectionInsight text={pickDataSection(dataGenAiParsed, "target")} />
+          </>
           )}
 
           {showCsi && (
@@ -359,6 +375,7 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
             />
           </ChartCard>
           )}
+          <GenAiSectionInsight text={pickDataSection(dataGenAiParsed, "feature")} />
     </div>
   );
 }

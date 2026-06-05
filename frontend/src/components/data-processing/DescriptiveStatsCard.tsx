@@ -44,12 +44,7 @@ export function DescriptiveStatsCard({ rows }: DescriptiveStatsCardProps) {
       animate={{ opacity: 1, y: 0 }}
       className="rounded-xl border border-border bg-gradient-to-br from-muted/30 via-background to-background overflow-hidden"
     >
-      <div className="px-4 py-3 border-b border-border/60 bg-muted/15">
-        <p className="text-sm font-semibold text-foreground">Descriptive statistics</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">
-          Development vs new cohort — {rows.length} feature{rows.length === 1 ? "" : "s"}
-        </p>
-      </div>
+      
 
       <div className="max-h-[min(70vh,520px)] overflow-y-auto overflow-x-auto">
         <table className="w-full text-xs">

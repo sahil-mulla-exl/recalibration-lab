@@ -15,7 +15,7 @@ export function FeatureDistributionChart({ rows }: FeatureDistributionChartProps
   const legend = useMemo(
     () => [
       { value: `${driftBaselineLabel()} %`, type: "square" as const, color: theme.series.train, dataKey: "trainPct" },
-      { value: `${INGESTION_DATASETS.new_data.label} %`, type: "square" as const, color: theme.series.new, dataKey: "newPct" },
+      { value: `${INGESTION_DATASETS.new_data_oos.label} %`, type: "square" as const, color: theme.series.new, dataKey: "newPct" },
     ],
     [theme.series.train, theme.series.new],
   );

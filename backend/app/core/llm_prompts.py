@@ -18,9 +18,9 @@ class LLMPromptProfile:
 _DEFAULT_PROFILES: Dict[str, LLMPromptProfile] = {
     "default_chat": LLMPromptProfile(1024, 0.3, "General assistant replies"),
     "data_processing": LLMPromptProfile(800, 0.2, "Data processing step explanations"),
-    "drift_diagnostics": LLMPromptProfile(1200, 0.25, "Drift narrative and PSI interpretation"),
+    "drift_diagnostics": LLMPromptProfile(1800, 0.25, "Drift narrative and PSI interpretation"),
     "recalibration": LLMPromptProfile(900, 0.25, "Recalibration run summaries"),
-    "evaluation": LLMPromptProfile(900, 0.25, "Metric comparison and evaluation insights"),
+    "evaluation": LLMPromptProfile(1800, 0.25, "Metric comparison and evaluation insights"),
     "export_mrm": LLMPromptProfile(1500, 0.2, "MRM export narrative"),
     "root_cause": LLMPromptProfile(1200, 0.3, "Root-cause attribution summaries"),
     "policy_guardrails": LLMPromptProfile(600, 0.1, "Policy / guardrail explanations"),

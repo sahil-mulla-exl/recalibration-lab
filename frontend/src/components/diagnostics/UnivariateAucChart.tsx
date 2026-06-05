@@ -16,7 +16,7 @@ type UnivariateAucChartProps = {
 export function UnivariateAucChart({
   rows,
   baselineLabel = driftBaselineLabel(),
-  compareLabel = INGESTION_DATASETS.new_data.label,
+  compareLabel = INGESTION_DATASETS.new_data_oos.label,
 }: UnivariateAucChartProps) {
   const theme = useChartTheme();
   const fmt3 = (v: number | string) => Number(v).toFixed(3);

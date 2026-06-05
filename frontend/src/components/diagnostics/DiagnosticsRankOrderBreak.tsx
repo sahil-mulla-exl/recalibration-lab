@@ -157,7 +157,7 @@ export function DiagnosticsRankOrderBreak({ perf }: DiagnosticsRankOrderBreakPro
                   dataKey="dev"
                   stroke={theme.series.dev}
                   strokeWidth={theme.plot.lineStrokeWidth}
-                  dot={false}
+                  dot={{ r: 3, fill: theme.series.dev, stroke: theme.series.dev, strokeWidth: 1 }}
                   legendType="none"
                 />
               </ComposedChart>

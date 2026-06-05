@@ -44,6 +44,8 @@ export function SummaryTab({ report, modelClass, optimizationMethodLabel, onConf
 
       recommendation={recommendation}
 
+      report={report}
+
       signals={(report.signal_grid ?? {}) as Record<string, unknown>}
 
       modelClass={modelClass}

@@ -59,7 +59,7 @@ export function MissingRateTable({ rows }: MissingRateTableProps) {
             <tr className="text-left">
               <th className="px-3 py-2 font-medium">Feature</th>
               <th className="px-3 py-2 font-medium">{`${driftBaselineLabel()} %`}</th>
-              <th className="px-3 py-2 font-medium">{`${INGESTION_DATASETS.new_data.label} %`}</th>
+              <th className="px-3 py-2 font-medium">{`${INGESTION_DATASETS.new_data_oos.label} %`}</th>
               <th className="px-3 py-2 font-medium">Delta (pp)</th>
               <th className="px-3 py-2 font-medium">Severity</th>
             </tr>

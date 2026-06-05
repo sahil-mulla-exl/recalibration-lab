@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "prompts": {
+    "performance_drift": {
+      "file": "performance_drift.md",
+      "llm_context": "drift_diagnostics",
+      "wire_location": "backend/app/services/drift_agent.py — after performance_drift + interpretability computed; payload from performance_drift + interpretability",
+      "ui_location": "frontend PerfDriftTab — GenAiInsightsPanel"
+    },
+    "data_drift": {
+      "file": "data_drift.md",
+      "llm_context": "drift_diagnostics",
+      "wire_location": "backend/app/services/drift_agent.py — assemble_report; payload from data_drift",
+      "ui_location": "frontend DataDriftTab — GenAiInsightsPanel"
+    },
+    "concept_drift": {
+      "file": "concept_drift.md",
+      "llm_context": "drift_diagnostics",
+      "wire_location": "backend/app/services/drift_agent.py — assemble_report; payload from concept_drift + prior stream summaries",
+      "ui_location": "frontend ConceptDriftTab — GenAiInsightsPanel"
+    },
+    "recalibration_decision": {
+      "file": "recalibration_decision.md",
+      "llm_context": "drift_diagnostics",
+      "wire_location": "backend/app/services/drift_agent.py — assemble_report; payload from signal_grid + all drift sections + rule recommendation",
+      "ui_location": "frontend SummaryTab / FinalHitlPanel — GenAiInsightsPanel"
+    },
+    "evaluation": {
+      "file": "evaluation.md",
+      "llm_context": "evaluation",
+      "wire_location": "backend/app/services/evaluation_agent.py — end of run(); payload from evaluation_result metrics",
+      "ui_location": "frontend Evaluation.tsx — GenAiInsightsPanel above RecommendBanner"
+    }
+  }
+}

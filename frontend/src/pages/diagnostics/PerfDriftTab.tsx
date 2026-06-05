@@ -24,6 +24,13 @@ import { RocChart } from "@/components/diagnostics/RocChart";
 import { ShapFlagCards } from "@/components/diagnostics/ShapFlagCards";
 import { ShapImportanceChart } from "@/components/diagnostics/ShapImportanceChart";
 import { ShapImportanceTable } from "@/components/diagnostics/ShapImportanceTable";
+import {
+  GenAiSectionInsight,
+  GenAiTabSummary,
+  pickGenAiInsight,
+  useParsedGenAiInsight,
+} from "@/components/diagnostics/GenAiInsightsPanel";
+import { pickPerformanceSection } from "@/lib/genaiInsightParse";
 import { DiagnosticsSectionHeading } from "@/components/diagnostics/DiagnosticsSectionHeading";
 import { PERFORMANCE_DRIFT_SECTIONS } from "@/config/diagnostics";
 import {
@@ -292,8 +299,12 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
   const pdpFeatureTypes = (interp.pdp_feature_types ?? {}) as Record<string, string>;
   const pdpChartType = pdpFeatureTypes[selectedPdpFeature] === "categorical" ? "bar" : "line";
 
+  const perfGenAi = pickGenAiInsight(report, "performance_drift");
+  const perfGenAiParsed = useParsedGenAiInsight(perfGenAi);
+
   return (
     <div className="space-y-4">
+      <GenAiTabSummary insight={perfGenAi} title="AI performance summary" />
       {vis.showClassificationBlock && (
       <div className="space-y-4">
           <DiagnosticsSectionHeading title={PERFORMANCE_DRIFT_SECTIONS[0].label} />
@@ -394,6 +405,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
               </TableBody>
             </Table>
           </ChartCard>
+          <GenAiSectionInsight text={pickPerformanceSection(perfGenAiParsed, "classification")} />
       </div>
       )}
 
@@ -445,6 +457,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
               </div>
             )}
           </div>
+          <GenAiSectionInsight text={pickPerformanceSection(perfGenAiParsed, "discrimination")} />
       </div>
       )}
 
@@ -457,6 +470,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
             <DecileChart data={decileData} />
           </ChartCard>
           )}
+          <GenAiSectionInsight text={pickPerformanceSection(perfGenAiParsed, "rank")} />
       </div>
       )}
 
@@ -523,6 +537,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
             <PdpChart dev={pdpDevPoints} current={pdpNewPoints} chartType={pdpChartType} />
           </ChartCard>
           )}
+          <GenAiSectionInsight text={pickPerformanceSection(perfGenAiParsed, "interpretability")} />
       </div>
       )}
     </div>

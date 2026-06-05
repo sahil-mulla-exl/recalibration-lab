@@ -59,7 +59,7 @@ export function TargetEventRateChart({ trainingRatePct, newRatePct, breakdownRow
   const legend = useMemo(
     () => [
       { value: driftBaselineLabel(), type: "square" as const, color: theme.series.train, dataKey: "training" },
-      { value: INGESTION_DATASETS.new_data.label, type: "square" as const, color: theme.series.new, dataKey: "newData" },
+      { value: INGESTION_DATASETS.new_data_oos.label, type: "square" as const, color: theme.series.new, dataKey: "newData" },
     ],
     [theme.series.train, theme.series.new],
   );
@@ -82,7 +82,7 @@ export function TargetEventRateChart({ trainingRatePct, newRatePct, breakdownRow
           <Tooltip
             formatter={(value: number, name: string) => [
               `${fmt1(value)}%`,
-              name === "training" ? driftBaselineLabel() : INGESTION_DATASETS.new_data.label,
+              name === "training" ? driftBaselineLabel() : INGESTION_DATASETS.new_data_oos.label,
             ]}
             labelFormatter={(label) => `Segment: ${label}`}
             {...chartTooltipProps(theme)}

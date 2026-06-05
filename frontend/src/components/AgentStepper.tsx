@@ -81,7 +81,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
 const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
   ingestion: {
     parse_dev_data: `Read and validate the ${DEV} upload; infer schema, dtypes, and row counts.`,
-    parse_new_data: `Read and validate the ${NEW} upload used for drift comparison.`,
+    parse_new_data: `Read and validate the ${NEW} upload; appended to ${DEV} during recalibration training.`,
     parse_hold_data: `Load the ${HOLD} upload if provided.`,
     refinement: `Align column names and types across ${ALL_DATASETS} so downstream scoring uses a consistent schema.`,
     parse_new_data_oos: `Load the ${NEW_VAL} upload when provided.`,
@@ -110,7 +110,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
   },
   recalibration: {
     apply_variable_drops: "Remove variables flagged during diagnostics from the training feature set.",
-    prepare_training_data: `Append ${NEW} to ${DEV} and build train / test matrices with aligned labels.`,
+    prepare_training_data: `Append ${NEW} to ${DEV} for training; validate tuning on ${HOLD} when uploaded.`,
     setup_hp_search: "Configure search space and optimization method from inventory settings.",
     run_hp_tuning: "Run cross-validated hyperparameter search trials and track best score.",
     train_final_model: "Fit the final model using the best hyperparameters on the full training window.",

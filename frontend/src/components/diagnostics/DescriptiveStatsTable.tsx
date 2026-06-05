@@ -8,7 +8,7 @@ const fmt = (value: unknown) => (typeof value === "number" && Number.isFinite(va
 
 export function DescriptiveStatsTable({ rows }: DescriptiveStatsTableProps) {
   const devLabel = INGESTION_DATASETS.dev_data.label;
-  const newLabel = INGESTION_DATASETS.new_data.label;
+  const newLabel = INGESTION_DATASETS.new_data_oos.label;
 
   return (
     <div className="w-full rounded-md border border-gray-200 dark:border-slate-700 overflow-hidden">

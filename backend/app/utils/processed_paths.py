@@ -7,7 +7,7 @@ from typing import Any, Dict, Literal, Optional
 import numpy as np
 import pandas as pd
 
-DatasetKind = Literal["dev", "new", "hold", "oot", "recal_train"]
+DatasetKind = Literal["dev", "new", "hold", "oot", "recal_train", "recal_oos"]
 
 _DATASET_BASENAME = {
     "dev": "processed_dev",
@@ -15,6 +15,7 @@ _DATASET_BASENAME = {
     "hold": "processed_hold",
     "oot": "processed_oot",
     "recal_train": "recalibration_training",
+    "recal_oos": "recalibrated_oos_scores",
 }
 
 

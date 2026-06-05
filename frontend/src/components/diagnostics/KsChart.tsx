@@ -30,21 +30,30 @@ export function KsChart({ data }: KsChartProps) {
           <XAxis
             {...chartXAxis(theme, "Population (%)", {
               dataKey: "population_pct",
+              type: "number",
+              domain: [0, 100] as [number, number],
               tickFormatter: (v) => `${fmt3(v)}%`,
             })}
           />
-          <YAxis {...chartYAxis(theme, "Cumulative rate", { tickFormatter: fmt3 })} />
+          <YAxis
+            {...chartYAxis(theme, "Cumulative rate (%)", {
+              type: "number",
+              domain: [0, 100] as [number, number],
+              tickFormatter: (v) => `${fmt3(v)}%`,
+            })}
+          />
           <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme, { cursor: "line" })} />
           <Line type="monotone" dataKey="cum_pos_pct" stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />
           <Line type="monotone" dataKey="cum_neg_pct" stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />
           {ksPopPct != null && Number.isFinite(ksPopPct) && (
             <ReferenceLine
               x={ksPopPct}
-              stroke={theme.series.train}
-              strokeDasharray="5 5"
-              strokeWidth={1}
+              stroke={theme.series.trend}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              ifOverflow="extendDomain"
               label={{
-                value: ksMax != null ? `KS ${fmt3(ksMax)}` : "KS max",
+                value: ksMax != null ? `KS ${fmt3(ksMax)}%` : "KS max",
                 position: "insideTop",
                 fontSize: 10,
                 fill: theme.axis,

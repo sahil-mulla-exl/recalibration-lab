@@ -209,6 +209,8 @@ def _resolve_processed_path(session: dict, dataset: str) -> str | None:
     if dataset == "new":
         return session.get("processed_new_path")
     if dataset == "oot":
+        return session.get("processed_oos_path")
+    if dataset == "recal_oos":
         return session.get("oot_scores_path")
     if dataset == "hold":
         return session.get("processed_hold_path")
@@ -218,7 +220,7 @@ def _resolve_processed_path(session: dict, dataset: str) -> str | None:
 @router.get("/processed-data")
 async def export_processed_data(
     session_id: str = Query(...),
-    dataset: str = Query("dev", pattern="^(dev|new|hold|oot)$"),
+    dataset: str = Query("dev", pattern="^(dev|new|hold|oot|recal_oos)$"),
     format: str = Query("csv", pattern="^(csv|parquet)$"),
 ):
     """Export processed dataset with score and predicted_proba columns."""
@@ -230,7 +232,8 @@ async def export_processed_data(
         "dev": "processed_dev_csv_path",
         "new": "processed_new_csv_path",
         "hold": "processed_hold_csv_path",
-        "oot": "oot_scores_csv_path",
+        "oot": "processed_oos_csv_path",
+        "recal_oos": "oot_scores_csv_path",
     }.get(dataset)
     csv_on_disk = session.get(csv_key) if csv_key else None
     if format == "csv" and csv_on_disk and os.path.exists(csv_on_disk):

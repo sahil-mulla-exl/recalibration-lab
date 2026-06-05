@@ -19,7 +19,7 @@ export function IvStrengthChart({ rows }: IvStrengthChartProps) {
   const legend = useMemo(
     () => [
       { value: driftBaselineLabel(), type: "square" as const, color: theme.series.train, dataKey: "ivTrain" },
-      { value: INGESTION_DATASETS.new_data.label, type: "square" as const, color: theme.series.new, dataKey: "ivNew" },
+      { value: INGESTION_DATASETS.new_data_oos.label, type: "square" as const, color: theme.series.new, dataKey: "ivNew" },
     ],
     [theme.series.train, theme.series.new],
   );

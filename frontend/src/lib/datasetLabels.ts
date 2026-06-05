@@ -58,6 +58,15 @@ const PHRASE_REPLACEMENTS: Array<[string, string]> = [
   ["New Data", NEW],
   ["Development Validation Sample", HOLD],
   ["New Validation Sample", NEW_VAL],
+  ["Generating GenAI evaluation insights (when LLM is configured)…", "Generating AI evaluation insights…"],
+  ["Generating GenAI insights (when LLM is configured)…", "Generating AI insights…"],
+  ["GenAI evaluation insights skipped:", "AI evaluation insights skipped:"],
+  ["GenAI insights skipped:", "AI insights skipped:"],
+  ["LLM is not configured. Set LLM_USE_GATEWAY or LLM_CHAT_API_KEY in backend/.env", "AI is not configured. Re-run this agent after AI is configured in the backend."],
+  ["empty LLM response", "empty AI response"],
+  ["GenAI insights", "AI insights"],
+  ["GenAI", "AI"],
+  ["LLM", "AI"],
 ];
 
 /** Replace legacy dev/new/hold/OOS shorthand in agent logs and summaries. */

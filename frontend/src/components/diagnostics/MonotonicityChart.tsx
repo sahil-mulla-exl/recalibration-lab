@@ -58,7 +58,7 @@ export function MonotonicityChart({ data }: MonotonicityChartProps) {
   );
 
   const devLabel = driftBaselineLabel();
-  const newLabel = INGESTION_DATASETS.new_data.label;
+  const newLabel = INGESTION_DATASETS.new_data_oos.label;
 
   const legend = useMemo(
     () => [

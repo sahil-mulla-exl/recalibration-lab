@@ -121,8 +121,13 @@ export function chartDataKeyLabel(dataKey: string | number | undefined, fallback
   return CHART_DATAKEY_LABELS[key] ?? fallback ?? key;
 }
 
+/** Compare cohort for data + concept drift (New Test Data — not New Train). */
+export function driftCompareCohortLabel(): string {
+  return INGESTION_DATASETS.new_data_oos.label;
+}
+
 export function driftCompareSubtitle(): string {
-  return `${driftBaselineLabel()} vs ${INGESTION_DATASETS.new_data_oos.label}`;
+  return `${driftBaselineLabel()} vs ${driftCompareCohortLabel()}`;
 }
 
 export function perfCompareSubtitle(): string {

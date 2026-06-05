@@ -255,6 +255,24 @@ class DriftDiagnosticsAgent(Agent):
             ctx.governance,
         )
         recommendation = await asyncio.to_thread(self._recommend, signal)
+        await self.log("Generating AI insights…")
+        genai_insights: Dict[str, Any] = {}
+        try:
+            from backend.app.services.genai_insights_service import enrich_diagnostics_report
+
+            genai_insights = await enrich_diagnostics_report(
+                {
+                    "problem_type": ctx.problem_type,
+                    "data_drift": data_drift,
+                    "concept_drift": concept_drift,
+                    "performance_drift": perf_drift,
+                    "interpretability": interpretability,
+                    "signal_grid": signal,
+                    "recommendation": recommendation,
+                }
+            )
+        except Exception as exc:
+            await self.log(f"AI insights skipped: {exc}")
         report = {
             "version": "v3",
             "problem_type": ctx.problem_type,
@@ -279,6 +297,7 @@ class DriftDiagnosticsAgent(Agent):
             "interpretability": interpretability,
             "signal_grid": signal,
             "recommendation": recommendation,
+            "genai_insights": genai_insights,
         }
         report.update(self._legacy_compat_shape(report))
         update_session(self.session_id, {"drift_result": report})
@@ -451,14 +470,17 @@ class DriftDiagnosticsAgent(Agent):
                 train_segment_series = ctx.train_df[col]
                 new_segment_series = drift_df[col]
                 train_target_series = self._coerce_binary_target(ctx.train_df[ctx.train_target_col])
-                new_target_series = self._coerce_binary_target(ctx.new_df[ctx.new_target_col])
+                new_target_series = self._coerce_binary_target(drift_df[drift_target_col])
             else:
-                if ctx.train_target_col not in ctx.raw_train_df.columns or ctx.new_target_col not in ctx.raw_new_df.columns:
+                if (
+                    ctx.train_target_col not in ctx.raw_train_df.columns
+                    or drift_target_col not in ctx.raw_new_df.columns
+                ):
                     continue
                 train_segment_series = ctx.raw_train_df[col]
                 new_segment_series = ctx.raw_new_df[col]
                 train_target_series = self._coerce_binary_target(ctx.raw_train_df[ctx.train_target_col])
-                new_target_series = self._coerce_binary_target(ctx.raw_new_df[ctx.new_target_col])
+                new_target_series = self._coerce_binary_target(ctx.raw_new_df[drift_target_col])
             train_seg = pd.DataFrame(
                 {
                     "segment": train_segment_series.fillna("__NULL__").astype(str),
