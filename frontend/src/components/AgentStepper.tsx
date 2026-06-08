@@ -68,7 +68,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "serialize_new_model", name: "Serialize new model object", status: "pending" },
   ],
   evaluation: [
-    { id: "score_oot_with_original", name: `Score ${HOLD} and ${NEW_VAL} (champion + recalibrated)`, status: "pending" },
+    { id: "score_oot_with_original", name: `Score ${HOLD} and ${NEW_VAL} (existing + recalibrated)`, status: "pending" },
     { id: "compute_performance_metrics", name: "Compute performance metrics (AUC, KS, lift)", status: "pending" },
     { id: "compute_variable_experience", name: "Compute variable importance comparison", status: "pending" },
     { id: "compute_score_migration", name: "Score decile migration (existing vs recalibrated)", status: "pending" },
