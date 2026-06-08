@@ -19,6 +19,8 @@ import {
   cartesianGrid,
   categoryChartMargin,
   chartTooltipProps,
+  formatChartPercent,
+  formatChartValue,
   useChartTheme,
 } from "@/lib/chartTheme";
 
@@ -38,11 +40,7 @@ function toDisplayPct(v: number): number {
 }
 
 function formatContrib(v: number): string {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "0";
-  if (Math.abs(n) < 0.0001) return n.toExponential(2);
-  if (Math.abs(n) < 0.01) return n.toFixed(4);
-  return n.toFixed(3);
+  return formatChartValue(v);
 }
 
 export function DistributionExplorerCharts({
@@ -141,12 +139,12 @@ export function DistributionExplorerCharts({
               <YAxis
                 {...chartYAxis(theme, "Cohort share (%)", {
                   domain: [0, Math.ceil(distMax / 5) * 5],
-                  tickFormatter: (v) => `${Number(v).toFixed(0)}%`,
+                  tickFormatter: (v) => formatChartPercent(v),
                   width: 48,
                 })}
               />
               <Tooltip
-                formatter={(value: number) => [`${Number(value).toFixed(2)}%`, ""]}
+                formatter={(value: number) => [formatChartPercent(value), ""]}
                 {...chartTooltipProps(theme)}
               />
               <Bar

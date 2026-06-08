@@ -13,7 +13,7 @@ import { driftBaselineLabel, INGESTION_DATASETS } from "@/config/datasets";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { rateToPercent } from "@/lib/chartLayout";
-import { cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartMargin, chartTooltipProps, formatChartPercent, useChartTheme } from "@/lib/chartTheme";
 
 export type BivariatePoint = {
   x: string;
@@ -88,7 +88,7 @@ export function MonotonicityChart({ data }: MonotonicityChartProps) {
               {...chartYAxis(theme, "Event rate (%)", {
                 yAxisId: "eventRate",
                 domain: [0, Math.ceil(eventRateMax / 5) * 5],
-                tickFormatter: (v) => `${Number(v).toFixed(0)}%`,
+                tickFormatter: (v) => formatChartPercent(v),
               })}
             />
             <YAxis
@@ -96,11 +96,11 @@ export function MonotonicityChart({ data }: MonotonicityChartProps) {
                 yAxisId: "population",
                 orientation: "right",
                 domain: [0, Math.ceil(popMax / 5) * 5],
-                tickFormatter: (v) => `${Number(v).toFixed(0)}%`,
+                tickFormatter: (v) => formatChartPercent(v),
               })}
             />
             <Tooltip
-              formatter={(value: number, name: string) => [`${Number(value).toFixed(2)}%`, name]}
+              formatter={(value: number, name: string) => [formatChartPercent(value), name]}
               {...chartTooltipProps(theme)}
             />
             <Bar

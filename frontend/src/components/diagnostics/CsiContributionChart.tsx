@@ -14,6 +14,7 @@ import {
   cartesianGrid,
   categoryChartMargin,
   chartTooltipProps,
+  formatChartValue,
   useChartTheme,
 } from "@/lib/chartTheme";
 
@@ -29,7 +30,7 @@ export function CsiContributionChart({ rows }: CsiContributionChartProps) {
 
   const theme = useChartTheme();
 
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
 
   const featureLabels = useMemo(() => rows.map((r) => r.feature), [rows]);
 
@@ -71,9 +72,9 @@ export function CsiContributionChart({ rows }: CsiContributionChartProps) {
 
           />
 
-          <YAxis {...chartYAxis(theme, "CSI contribution", { tickFormatter: fmt3 })} />
+          <YAxis {...chartYAxis(theme, "CSI contribution", { tickFormatter: fmt })} />
 
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme)} />
 
           <Bar dataKey="contribution" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
 

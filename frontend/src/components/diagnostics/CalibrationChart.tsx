@@ -3,14 +3,14 @@ import { perfBaselineLabel, perfNewLabel } from "@/config/datasets";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
-import { cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartMargin, chartTooltipProps, formatChartValue, formatChartPercent, useChartTheme } from "@/lib/chartTheme";
 
 type CalibrationPoint = { x: number; dev: number; current: number };
 type CalibrationChartProps = { data: CalibrationPoint[] };
 
 export function CalibrationChart({ data }: CalibrationChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
 
   const legend = useMemo(
     () => [
@@ -25,9 +25,9 @@ export function CalibrationChart({ data }: CalibrationChartProps) {
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={chartMargin.xyTitles}>
           <CartesianGrid {...cartesianGrid(theme)} />
-          <XAxis {...chartXAxis(theme, "Score decile", { dataKey: "x", tickFormatter: fmt3 })} />
-          <YAxis {...chartYAxis(theme, "Observed event rate", { tickFormatter: fmt3 })} />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme, { cursor: "line" })} />
+          <XAxis {...chartXAxis(theme, "Score decile", { dataKey: "x", tickFormatter: fmt })} />
+          <YAxis {...chartYAxis(theme, "Observed event rate", { tickFormatter: fmt })} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme, { cursor: "line" })} />
           <Line type="monotone" dataKey="dev" stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />
           <Line type="monotone" dataKey="current" stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />
         </LineChart>

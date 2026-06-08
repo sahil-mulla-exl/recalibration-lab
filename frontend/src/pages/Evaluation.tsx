@@ -14,6 +14,8 @@ import {
   cartesianGrid,
   chartMargin,
   chartTooltipProps,
+  formatChartPercent,
+  formatChartValue,
   useChartTheme,
 } from "@/lib/chartTheme";
 import { Button } from "@/components/ui/button";
@@ -51,7 +53,7 @@ import {
   pickGenAiInsight,
   useParsedGenAiInsight,
 } from "@/components/diagnostics/GenAiInsightsPanel";
-import { pickEvaluationSection } from "@/lib/genaiInsightParse";
+import { buildEvaluationCombinedBullets, pickEvaluationSection } from "@/lib/genaiInsightParse";
 import { KsChart } from "@/components/diagnostics/KsChart";
 import { toKsChartData } from "@/lib/ksCurve";
 import type { ChartTheme } from "@/lib/chartTheme";
@@ -67,6 +69,8 @@ import {
   cohortMetricFromReport,
   cohortMetricFromReportWithFallback,
   cohortRocFromReport,
+  downsampleRocPoints,
+  mergeRocSeriesForChart,
 } from "@/lib/evaluationReport";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -147,7 +151,7 @@ function RecommendBanner({
                 ? `Recalibrated RMSE improved by ${rmseDelta.toFixed(4)} with R2 ${Number(report.new_r2 || 0).toFixed(4)}.`
                 : `Regression gain is marginal (RMSE Δ ${rmseDelta.toFixed(4)}). Validate on additional holdouts.`
               : deploy
-                ? `Recalibrated AUC +${(aucDelta * 100).toFixed(2)} pp above champion. Jaccard overlap: ${(Number(report.jaccard) * 100).toFixed(1)}%.`
+                ? `Recalibrated AUC +${(aucDelta * 100).toFixed(2)} pp above champion. Top-decile overlap: ${(Number(report.top_decile_overlap ?? report.jaccard) * 100).toFixed(1)}%.`
                 : `AUC improvement on ${EVALUATION_SERIES.recalibratedOos} is below threshold (${(aucDelta * 100).toFixed(2)} pp). Validate on additional holdouts.`}
           </p>
         </div>
@@ -349,31 +353,29 @@ export default function Evaluation() {
   const liftRows = Math.max(holdLift.length, championOosLift.length, recalOosLift.length);
   const liftData = Array.from({ length: liftRows }).map((_, i) => ({
     decile: `D${championOosLift[i]?.decile ?? holdLift[i]?.decile ?? i + 1}`,
-    [EVALUATION_DATA_KEYS.championHold]: Number((holdLift[i]?.lift ?? 0).toFixed(3)),
-    [EVALUATION_DATA_KEYS.championOos]: Number((championOosLift[i]?.lift ?? 0).toFixed(3)),
-    [EVALUATION_DATA_KEYS.recalibratedOos]: Number((recalOosLift[i]?.lift ?? 0).toFixed(3)),
+    [EVALUATION_DATA_KEYS.championHold]: Number((holdLift[i]?.lift ?? 0).toFixed(1)),
+    [EVALUATION_DATA_KEYS.championOos]: Number((championOosLift[i]?.lift ?? 0).toFixed(1)),
+    [EVALUATION_DATA_KEYS.recalibratedOos]: Number((recalOosLift[i]?.lift ?? 0).toFixed(1)),
   }));
 
-  const downsampleRoc = (roc?: { fpr: number[]; tpr: number[] }) => {
-    if (!roc?.fpr?.length) return [] as Array<{ fpr: number; tpr: number }>;
-    const step = Math.max(1, Math.floor(roc.fpr.length / 50));
-    return roc.fpr
-      .filter((_, i) => i % step === 0)
-      .map((fpr, idx) => ({
-        fpr: Number(fpr.toFixed(3)),
-        tpr: Number((roc.tpr[idx * step] ?? 0).toFixed(3)),
-      }));
-  };
-  const holdRocPts = downsampleRoc(cohortRocFromReport(report, "champion_hold", "champion_hold_roc"));
-  const championOosRocPts = downsampleRoc(cohortRocFromReport(report, "champion_oos", "orig_roc"));
-  const recalOosRocPts = downsampleRoc(cohortRocFromReport(report, "recalibrated_oos", "new_roc"));
-  const rocLen = Math.max(holdRocPts.length, championOosRocPts.length, recalOosRocPts.length);
-  const rocData = Array.from({ length: rocLen }).map((_, i) => ({
-    fpr: Number((championOosRocPts[i]?.fpr ?? holdRocPts[i]?.fpr ?? recalOosRocPts[i]?.fpr ?? 0).toFixed(3)),
-    [EVALUATION_DATA_KEYS.championHold]: holdRocPts[i]?.tpr ?? 0,
-    [EVALUATION_DATA_KEYS.championOos]: championOosRocPts[i]?.tpr ?? 0,
-    [EVALUATION_DATA_KEYS.recalibratedOos]: recalOosRocPts[i]?.tpr ?? 0,
-  }));
+  const rocData = useMemo(() => {
+    const series = [
+      {
+        key: EVALUATION_DATA_KEYS.championHold,
+        points: downsampleRocPoints(cohortRocFromReport(report, "champion_hold", "champion_hold_roc")),
+      },
+      {
+        key: EVALUATION_DATA_KEYS.championOos,
+        points: downsampleRocPoints(cohortRocFromReport(report, "champion_oos", "orig_roc")),
+      },
+      {
+        key: EVALUATION_DATA_KEYS.recalibratedOos,
+        points: downsampleRocPoints(cohortRocFromReport(report, "recalibrated_oos", "new_roc")),
+      },
+    ].filter((entry) => entry.points.length > 0);
+    if (!series.length) return [];
+    return mergeRocSeriesForChart(series);
+  }, [report]);
 
   const ksCohorts = useMemo(
     () =>
@@ -428,8 +430,12 @@ export default function Evaluation() {
     (showFeatureImportance || showXgbNativeImportance || Boolean(shapImportance?.available));
   const evalGenAi = pickGenAiInsight(report ?? undefined, "evaluation");
   const evalGenAiParsed = useParsedGenAiInsight(evalGenAi);
-  const llmDeploymentInsight = pickEvaluationSection(evalGenAiParsed, "recommended");
-  const showLlmDeployment = evalGenAi?.status === "ok" && Boolean(llmDeploymentInsight?.trim());
+  const evalInsightBullets = useMemo(
+    () => buildEvaluationCombinedBullets(evalGenAiParsed, 4),
+    [evalGenAiParsed],
+  );
+  const showCombinedEvalInsight =
+    evalGenAi?.status === "ok" && evalInsightBullets.length > 0;
   const evaluationMetricRows = useMemo((): EvaluationMetricRow[] => {
     if (!report) return [];
     const m = (cohort: EvaluationCohortKey, field: string, legacy?: string) =>
@@ -552,7 +558,7 @@ export default function Evaluation() {
           ]
         : [
             ...(showAuc
-              ? [{ axis: "AUC", hold: m("champion_hold", "auc", "champion_hold_auc"), oos: m("champion_oos", "auc", "orig_auc"), recal: m("recalibrated_oos", "auc", "new_auc"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              ? [{ axis: "AUC", hold: m("champion_hold", "auc", "champion_hold_auc"), oos: m("champion_oos", "auc", "orig_auc"), recal: m("recalibrated_oos", "auc", "new_auc"), higherIsBetter: true as const, format: (v: number) => formatChartValue(v) }]
               : []),
             ...(showAuc
               ? [{
@@ -561,14 +567,14 @@ export default function Evaluation() {
                   oos: mAucPr("champion_oos", "orig_auc_pr"),
                   recal: mAucPr("recalibrated_oos", "new_auc_pr"),
                   higherIsBetter: true as const,
-                  format: (v: number) => v.toFixed(4),
+                  format: (v: number) => formatChartValue(v),
                 }]
               : []),
             ...(showKs
-              ? [{ axis: "KS", hold: m("champion_hold", "ks", "champion_hold_ks"), oos: m("champion_oos", "ks", "orig_ks"), recal: m("recalibrated_oos", "ks", "new_ks"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              ? [{ axis: "KS", hold: m("champion_hold", "ks", "champion_hold_ks"), oos: m("champion_oos", "ks", "orig_ks"), recal: m("recalibrated_oos", "ks", "new_ks"), higherIsBetter: true as const, format: (v: number) => formatChartValue(v) }]
               : []),
             ...(showGini
-              ? [{ axis: "Gini", hold: m("champion_hold", "gini", "champion_hold_gini"), oos: m("champion_oos", "gini", "orig_gini"), recal: m("recalibrated_oos", "gini", "new_gini"), higherIsBetter: true as const, format: (v: number) => v.toFixed(4) }]
+              ? [{ axis: "Gini", hold: m("champion_hold", "gini", "champion_hold_gini"), oos: m("champion_oos", "gini", "orig_gini"), recal: m("recalibrated_oos", "gini", "new_gini"), higherIsBetter: true as const, format: (v: number) => formatChartValue(v) }]
               : []),
             ...(showLift
               ? [{
@@ -577,7 +583,7 @@ export default function Evaluation() {
                   oos: m("champion_oos", "top_decile_lift", "top_decile_lift_orig"),
                   recal: m("recalibrated_oos", "top_decile_lift", "top_decile_lift_new"),
                   higherIsBetter: true as const,
-                  format: (v: number) => `${v.toFixed(3)}x`,
+                  format: (v: number) => `${formatChartValue(v)}x`,
                 }]
               : []),
             ...(showCalibration
@@ -587,7 +593,7 @@ export default function Evaluation() {
                   oos: m("champion_oos", "cal_error", "orig_cal_error"),
                   recal: m("recalibrated_oos", "cal_error", "new_cal_error"),
                   higherIsBetter: false as const,
-                  format: (v: number) => `${v.toFixed(2)}%`,
+                  format: (v: number) => formatChartPercent(v),
                 }]
               : []),
           ];
@@ -668,7 +674,14 @@ export default function Evaluation() {
       {done && report && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
 
-          <GenAiTabSummary insight={evalGenAi} title="AI evaluation summary" className="mb-4" />
+          {showCombinedEvalInsight && (
+            <GenAiTabSummary
+              insight={evalGenAi}
+              title="AI evaluation insights"
+              bullets={evalInsightBullets}
+              className="mb-4"
+            />
+          )}
           {!evalGenAi && (
             <Card className="p-4 mb-4 border-slate-200 dark:border-slate-700">
               <p className="text-sm text-muted-foreground">
@@ -677,9 +690,7 @@ export default function Evaluation() {
               </p>
             </Card>
           )}
-          {showLlmDeployment ? (
-            <GenAiSectionInsight text={llmDeploymentInsight} label="AI deployment recommendation" className="mb-4" />
-          ) : (
+          {!showCombinedEvalInsight && (
             <RecommendBanner report={report} problemType={problemType} />
           )}
           {SHOW_POLICY_GUARDRAILS && <PolicyGuardrailsCard guardrails={guardrails} />}
@@ -723,13 +734,13 @@ export default function Evaluation() {
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={rocData} margin={chartMargin.xyTitles}>
                         <CartesianGrid {...cartesianGrid(theme)} />
-                        <XAxis {...chartXAxis(theme, "False positive rate", { dataKey: "fpr", type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
-                        <YAxis {...chartYAxis(theme, "True positive rate", { type: "number", domain: [0, 1], tickFormatter: (v) => Number(v).toFixed(3) })} />
-                        <Tooltip formatter={(v: number) => v.toFixed(3)} {...chartTooltipProps(theme, { cursor: "line" })} />
+                        <XAxis {...chartXAxis(theme, "False positive rate", { dataKey: "fpr", type: "number", domain: [0, 1], tickFormatter: (v) => formatChartValue(v) })} />
+                        <YAxis {...chartYAxis(theme, "True positive rate", { type: "number", domain: [0, 1], tickFormatter: (v) => formatChartValue(v) })} />
+                        <Tooltip formatter={(v: number) => formatChartValue(v)} {...chartTooltipProps(theme, { cursor: "line" })} />
                         <RocDiagonalReferenceLine theme={theme} />
-                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.trainFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
-                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.devFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
-                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.newFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championHold} name={EVALUATION_SERIES.championHold} stroke={theme.series.train} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.trainFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" connectNulls />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.championOos} name={EVALUATION_SERIES.championOos} stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.devFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" connectNulls />
+                        <Area type="monotone" dataKey={EVALUATION_DATA_KEYS.recalibratedOos} name={EVALUATION_SERIES.recalibratedOos} stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} fill={theme.series.newFill} fillOpacity={theme.plot.areaFillOpacity} dot={false} legendType="none" connectNulls />
                       </AreaChart>
                     </ResponsiveContainer>
                   </ChartFrame>
@@ -852,7 +863,7 @@ export default function Evaluation() {
                     <CartesianGrid {...cartesianGrid(theme)} />
                     <XAxis {...chartXAxis(theme, "Score decile", { dataKey: "decile" })} />
                     <YAxis {...chartYAxis(theme, "Lift (×)", {})} />
-                    <Tooltip formatter={(v: number) => `${v.toFixed(3)}x`} {...chartTooltipProps(theme)} />
+                    <Tooltip formatter={(v: number) => `${formatChartValue(v)}x`} {...chartTooltipProps(theme)} />
                     <ReferenceLine y={1} stroke={theme.axisLine} strokeDasharray="4 4" label={{ value: "Baseline", fontSize: 9, fill: theme.axis }} />
                     <Bar dataKey={EVALUATION_DATA_KEYS.championHold} fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={theme.plot.barStrokeWidth} radius={[3, 3, 0, 0]} opacity={theme.plot.barLayerOpacity} legendType="none" />
                     <Bar dataKey={EVALUATION_DATA_KEYS.championOos} fill={theme.series.devFill} stroke={theme.series.dev} strokeWidth={theme.plot.barStrokeWidth} radius={[3, 3, 0, 0]} opacity={theme.plot.barLayerOpacity} legendType="none" />

@@ -16,7 +16,7 @@ from backend.app.services.genai_payloads import (
     build_recalibration_decision_payload,
 )
 from backend.app.services.genai_prompt_loader import get_llm_context, load_system_prompt
-from backend.app.services.llm_service import llm_service
+from backend.app.services.llm_service import llm_service, route_display_label
 
 _logger = logging.getLogger(__name__)
 
@@ -41,14 +41,35 @@ def _insight_result(
     status: str,
     text: str = "",
     error: Optional[str] = None,
+    llm_route: Optional[str] = None,
+    llm_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "prompt_id": prompt_id,
         "status": status,
         "text": text,
         "error": error,
+        "llm_route": llm_route,
+        "llm_model": llm_model,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def emit_insight_route_logs(
+    log_fn,
+    genai_insights: Dict[str, Any],
+) -> None:
+    """Write per-prompt LLM route lines to the agent stepper log."""
+    for prompt_id, insight in genai_insights.items():
+        if not isinstance(insight, dict):
+            continue
+        status = str(insight.get("status") or "")
+        if status != "ok":
+            continue
+        route = insight.get("llm_route") or "unknown route"
+        model = insight.get("llm_model")
+        model_suffix = f" — model {model}" if model else ""
+        await log_fn(f"AI {prompt_id}: response via {route}{model_suffix}")
 
 
 async def generate_insight(prompt_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -72,7 +93,22 @@ async def generate_insight(prompt_id: str, payload: Dict[str, Any]) -> Dict[str,
         )
         if not text.strip():
             return _insight_result(prompt_id, status="error", error="empty AI response")
-        return _insight_result(prompt_id, status="ok", text=text.strip())
+        meta = llm_service.last_completion
+        route_label = meta.display_label if meta else route_display_label("unknown")
+        model_id = meta.model_id if meta else None
+        _logger.info(
+            "GenAI insight %s generated via %s (model=%s)",
+            prompt_id,
+            route_label,
+            model_id or "unknown",
+        )
+        return _insight_result(
+            prompt_id,
+            status="ok",
+            text=text.strip(),
+            llm_route=route_label,
+            llm_model=model_id,
+        )
     except Exception as exc:
         _logger.warning("GenAI insight failed for %s: %s", prompt_id, exc)
         return _insight_result(prompt_id, status="error", text="", error=str(exc))

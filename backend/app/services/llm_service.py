@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.core.config import (
@@ -23,6 +24,27 @@ except ImportError:  # pragma: no cover
 _router_logger = logging.getLogger("rcl.llm.router")
 _logger = logging.getLogger(__name__)
 
+ROUTE_DISPLAY_LABELS: Dict[str, str] = {
+    "direct-azure": "primary (direct Azure)",
+    "gateway-fallback": "Exlerate gateway fallback",
+    "gateway": "Exlerate gateway",
+}
+
+
+@dataclass(frozen=True)
+class LLMCompletionMeta:
+    route: str
+    model_id: str
+    context: str
+
+    @property
+    def display_label(self) -> str:
+        return ROUTE_DISPLAY_LABELS.get(self.route, self.route)
+
+
+def route_display_label(route: str) -> str:
+    return ROUTE_DISPLAY_LABELS.get(route, route)
+
 
 def _build_litellm_kwargs(config: LitellmUsageConfig, overrides: Dict[str, Any]) -> Dict[str, Any]:
     merged = config.build_request_kwargs()
@@ -35,6 +57,11 @@ class LLMService:
 
     def __init__(self) -> None:
         self.chat_config: LitellmUsageConfig = settings.CHAT_LLM_CONFIG
+        self._last_completion: Optional[LLMCompletionMeta] = None
+
+    @property
+    def last_completion(self) -> Optional[LLMCompletionMeta]:
+        return self._last_completion
 
     def is_ready(self) -> bool:
         if completion is None:
@@ -128,6 +155,35 @@ class LLMService:
             raise RuntimeError("empty response")
         return response
 
+    def _record_success(
+        self,
+        *,
+        route: str,
+        model_id: str,
+        context: str,
+        cfg: LitellmUsageConfig,
+        attempt_idx: int,
+        t0: float,
+    ) -> None:
+        self._last_completion = LLMCompletionMeta(route=route, model_id=model_id, context=context)
+        self.chat_config = cfg
+        label = route_display_label(route)
+        _router_logger.info(
+            "context=%s attempt=%d model=%s route=%s display=%s status=success duration_ms=%.0f",
+            context,
+            attempt_idx,
+            model_id,
+            route,
+            label,
+            (__import__("time").perf_counter() - t0) * 1000,
+        )
+        _logger.info(
+            "LLM response via %s (model=%s, context=%s)",
+            label,
+            model_id,
+            context,
+        )
+
     def _execute_with_fallback(
         self,
         context: str,
@@ -153,24 +209,27 @@ class LLMService:
                 if gw is not None and gw.is_ready():
                     attempts.append(("gateway-fallback", gw))
 
-            for source, cfg in attempts:
+            for attempt_idx, (source, cfg) in enumerate(attempts, start=1):
                 try:
                     response = self._attempt_completion(cfg, overrides)
-                    _router_logger.info(
-                        "context=%s model=%s route=%s status=success source=env",
-                        context,
-                        cfg.model,
-                        source,
+                    self._record_success(
+                        route=source,
+                        model_id=cfg.model,
+                        context=context,
+                        cfg=cfg,
+                        attempt_idx=attempt_idx,
+                        t0=t0,
                     )
-                    self.chat_config = cfg
                     return response, cfg.model
                 except Exception as exc:
                     last_exc = exc
                     _router_logger.warning(
-                        "context=%s route=%s status=failed error=%s",
+                        "context=%s route=%s display=%s status=failed error=%s detail=%s",
                         context,
                         source,
+                        route_display_label(source),
                         type(exc).__name__,
+                        str(exc)[:300],
                     )
 
             raise RuntimeError(
@@ -182,25 +241,26 @@ class LLMService:
             for attempt_idx, (source, cfg) in enumerate(route_attempts, start=1):
                 try:
                     response = self._attempt_completion(cfg, overrides)
-                    _router_logger.info(
-                        "context=%s attempt=%d model=%s route=%s status=success duration_ms=%.0f",
-                        context,
-                        attempt_idx,
-                        model_id,
-                        source,
-                        (__import__("time").perf_counter() - t0) * 1000,
+                    self._record_success(
+                        route=source,
+                        model_id=model_id,
+                        context=context,
+                        cfg=cfg,
+                        attempt_idx=attempt_idx,
+                        t0=t0,
                     )
-                    self.chat_config = cfg
                     return response, model_id
                 except Exception as exc:
                     last_exc = exc
                     _router_logger.warning(
-                        "context=%s attempt=%d model=%s route=%s status=failed error=%s",
+                        "context=%s attempt=%d model=%s route=%s display=%s status=failed error=%s detail=%s",
                         context,
                         attempt_idx,
                         model_id,
                         source,
+                        route_display_label(source),
                         type(exc).__name__,
+                        str(exc)[:300],
                     )
 
         raise RuntimeError(

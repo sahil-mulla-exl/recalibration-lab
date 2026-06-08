@@ -60,9 +60,9 @@ INTERPRETABILITY
 ================================================================
 
 1. SHAP IMPORTANCE STABILITY
-   - State feature set Jaccard overlap, rank order shift count, and importance concentration delta
+   - State feature set overlap, rank order shift count, and importance concentration delta
    - Reference thresholds:
-     * Jaccard > 0.8 = feature set stable
+     * Feature set overlap > 0.8 = feature set stable
      * Rank shifts < 2 = ordering stable
      * Concentration delta < 5 pp = stable
    - Flag any top-5 feature that moved out of the top set or dropped in importance materially in new test data compared to existing test data.

@@ -23,4 +23,4 @@ REPRO_SCORE_OOS = f"Score {NEW_VALIDATION} with model"
 
 RECAL_SCORE_OOT = f"Score {NEW_VALIDATION}"
 
-EVAL_SCORE_HOLDOUTS = f"Score {HOLD_DATA} and {NEW_VALIDATION} (champion + recalibrated)"
+EVAL_SCORE_HOLDOUTS = f"Score {HOLD_DATA} and {NEW_VALIDATION} (Existing + recalibrated)"

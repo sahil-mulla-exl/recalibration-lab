@@ -6,11 +6,13 @@ export type CardinalityDriftRow = {
   feature: string;
   trainCount: number;
   newCount: number;
+  newOnlyCount: number;
+  lostCount: number;
   newOnly: string[];
   lost: string[];
 };
 
-type CardinalityFilter = "all" | "new" | "lost" | "stable";
+type CardinalityFilter = "all" | "new" | "lost";
 
 type CardinalityDriftTableProps = {
   rows: CardinalityDriftRow[];
@@ -20,41 +22,71 @@ const FILTERS: Array<{ id: CardinalityFilter; label: string }> = [
   { id: "all", label: "All features" },
   { id: "new", label: "New category" },
   { id: "lost", label: "Lost category" },
-  { id: "stable", label: "Stable" },
 ];
 
-function rowStatus(row: CardinalityDriftRow): Exclude<CardinalityFilter, "all"> {
-  if (row.newOnly.length > 0) return "new";
-  if (row.lost.length > 0) return "lost";
+function rowStatus(row: CardinalityDriftRow): CardinalityFilter | "stable" {
+  if (row.newOnlyCount > 0) return "new";
+  if (row.lostCount > 0) return "lost";
   return "stable";
 }
 
 function statusLabel(status: Exclude<CardinalityFilter, "all">): string {
   if (status === "new") return "New category";
-  if (status === "lost") return "Lost category";
-  return "Stable";
+  return "Lost category";
 }
 
 const STATUS_CLASSES: Record<Exclude<CardinalityFilter, "all">, string> = {
   new: "text-red-500 dark:text-red-300",
   lost: "text-amber-500 dark:text-amber-300",
-  stable: "text-emerald-500 dark:text-emerald-300",
 };
+
+function formatCategoryLabel(category: string): string {
+  if (category === "") return "(empty)";
+  return category;
+}
+
+function CategoryNameList({
+  categories,
+  tone,
+}: {
+  categories: string[];
+  tone: "new" | "lost";
+}) {
+  if (categories.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const pillClass =
+    tone === "new"
+      ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] border bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-300 dark:border-emerald-800"
+      : "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] border bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-300 dark:border-amber-800";
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {categories.map((category) => (
+        <span key={`${tone}-${category}`} className={pillClass} title={`Category: ${formatCategoryLabel(category)}`}>
+          {formatCategoryLabel(category)}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function CardinalityDriftTable({ rows }: CardinalityDriftTableProps) {
   const [activeFilter, setActiveFilter] = useState<CardinalityFilter>("all");
 
   const filteredRows = useMemo(
-    () => (activeFilter === "all" ? rows : rows.filter((row) => rowStatus(row) === activeFilter)),
+    () =>
+      activeFilter === "all"
+        ? rows
+        : rows.filter((row) => rowStatus(row) === activeFilter),
     [rows, activeFilter],
   );
 
   const summary = useMemo(
     () => ({
-      total: rows.length,
-      newCategory: rows.filter((row) => row.newOnly.length > 0).length,
-      lostCategory: rows.filter((row) => row.lost.length > 0).length,
-      stable: rows.filter((row) => row.newOnly.length === 0 && row.lost.length === 0).length,
+      newCategory: rows.filter((row) => row.newOnlyCount > 0).length,
+      lostCategory: rows.filter((row) => row.lostCount > 0).length,
     }),
     [rows],
   );
@@ -70,17 +102,11 @@ export function CardinalityDriftTable({ rows }: CardinalityDriftTableProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="px-2 py-1 rounded border bg-muted/40 font-semibold uppercase tracking-wide">
-          {summary.total} Total
-        </span>
         <span className="px-2 py-1 rounded border bg-red-500/10 border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 font-semibold uppercase tracking-wide">
           {summary.newCategory} New Category
         </span>
         <span className="px-2 py-1 rounded border bg-amber-500/10 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-300 font-semibold uppercase tracking-wide">
           {summary.lostCategory} Lost Category
-        </span>
-        <span className="px-2 py-1 rounded border bg-emerald-500/10 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-300 font-semibold uppercase tracking-wide">
-          {summary.stable} Stable
         </span>
       </div>
 
@@ -128,16 +154,20 @@ export function CardinalityDriftTable({ rows }: CardinalityDriftTableProps) {
                   <td className="px-3 py-2 font-medium">{row.feature}</td>
                   <td className="px-3 py-2 text-right font-mono tabular-nums">{row.trainCount}</td>
                   <td className="px-3 py-2 text-right font-mono tabular-nums">{row.newCount}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{row.newOnly.length}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{row.lost.length}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {row.newOnly.length > 0 ? row.newOnly.join(", ") : "—"}
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">{row.newOnlyCount}</td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">{row.lostCount}</td>
+                  <td className="px-3 py-2 text-xs whitespace-normal break-words">
+                    <CategoryNameList categories={row.newOnly} tone="new" />
                   </td>
-                  <td className="px-3 py-2 text-xs">
-                    {row.lost.length > 0 ? row.lost.join(", ") : "—"}
+                  <td className="px-3 py-2 text-xs whitespace-normal break-words">
+                    <CategoryNameList categories={row.lost} tone="lost" />
                   </td>
-                  <td className={`px-3 py-2 text-xs font-medium capitalize ${STATUS_CLASSES[status]}`}>
-                    {statusLabel(status)}
+                  <td className="px-3 py-2 text-xs font-medium">
+                    {status === "stable" ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className={STATUS_CLASSES[status]}>{statusLabel(status)}</span>
+                    )}
                   </td>
                 </tr>
               );

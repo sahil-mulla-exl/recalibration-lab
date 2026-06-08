@@ -11,27 +11,18 @@ import {
 } from "recharts";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { CARD_CHART_HEIGHT_RADAR } from "@/lib/chartLayout";
-import { axisTick, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+import { chartMargin, chartTooltipProps, formatChartValue, useChartTheme } from "@/lib/chartTheme";
 
 type RadarPerfChartProps = {
   data: Array<{ metric: string; dev: number; current: number }>;
 };
 
+/** Radar axes use a fixed 0–1 scale; tooltips show the underlying metric values. */
+const RADAR_DOMAIN: [number, number] = [0, 1];
+
 export function RadarPerfChart({ data }: RadarPerfChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
-
-  const domain = useMemo((): [number, number] => {
-    const values = data
-      .flatMap((row) => [Number(row.dev), Number(row.current)])
-      .filter((v) => Number.isFinite(v));
-    if (values.length === 0) return [0, 1];
-    const maxValue = Math.max(...values);
-    if (maxValue <= 1.01) return [0, 1];
-    const minValue = Math.min(...values);
-    const pad = Math.max((maxValue - minValue) * 0.08, maxValue * 0.05, 0.01);
-    return [Math.max(0, minValue - pad), maxValue + pad];
-  }, [data]);
+  const fmt = formatChartValue;
 
   const legend = useMemo(
     () => [
@@ -62,12 +53,12 @@ export function RadarPerfChart({ data }: RadarPerfChartProps) {
             tickLine={false}
           />
           <PolarRadiusAxis
-            domain={domain}
+            domain={RADAR_DOMAIN}
             tick={false}
             axisLine={false}
             stroke={theme.axisLine}
           />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme, { cursor: false })} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme, { cursor: false })} />
           <Radar
             dataKey="dev"
             name={perfBaselineShortLabel()}

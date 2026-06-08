@@ -344,6 +344,22 @@ export function pickEvaluationSection(
   return pickSectionText(parsed, EVALUATION_GENAI_SECTIONS[sectionId]);
 }
 
+/** Concise evaluation tab summary: headline metrics + deployment verdict. */
+export function buildEvaluationCombinedBullets(
+  parsed: ParsedGenAiInsight | null,
+  maxBullets = 4,
+): string[] {
+  if (!parsed) return [];
+  const metrics = pickEvaluationSection(parsed, "metrics");
+  const recommended = pickEvaluationSection(parsed, "recommended");
+  const merged = [
+    ...extractInsightBullets(metrics ?? "", 2),
+    ...extractInsightBullets(recommended ?? "", 2),
+  ].filter((bullet, index, arr) => arr.indexOf(bullet) === index);
+  if (merged.length) return merged.slice(0, maxBullets);
+  return parsed.tabSummaryBullets.slice(0, maxBullets);
+}
+
 export function pickRecalibrationSection(
   parsed: ParsedGenAiInsight | null,
   sectionId: keyof typeof RECALIBRATION_GENAI_SECTIONS,

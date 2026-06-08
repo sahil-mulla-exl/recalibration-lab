@@ -8,7 +8,7 @@ import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 
-import { cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartMargin, chartTooltipProps, formatChartValue, formatChartPercent, useChartTheme } from "@/lib/chartTheme";
 
 
 
@@ -22,7 +22,7 @@ export function DecileChart({ data }: DecileChartProps) {
 
   const theme = useChartTheme();
 
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
 
 
 
@@ -56,11 +56,11 @@ export function DecileChart({ data }: DecileChartProps) {
 
           <YAxis
             {...chartYAxis(theme, "Event rate (%)", {
-              tickFormatter: (v) => `${fmt3(v)}%`,
+              tickFormatter: (v) => formatChartPercent(v),
             })}
           />
 
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme)} />
 
           <Bar dataKey="dev" fill={theme.series.devFill} stroke={theme.series.dev} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
 

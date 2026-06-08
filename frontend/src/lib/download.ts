@@ -24,7 +24,7 @@ export function downloadFeatureListCsv(features: string[], filename: string) {
 }
 
 /** Download selected features as .xlsx via backend export API. */
-/** Download cached combined Existing Train + New Train recalibration dataset (CSV). */
+/** Download combined Existing Train + New Train recalibration dataset (CSV). Available after Data Processing. */
 export async function downloadRecalibrationTrainingData(
   sessionId: string,
   filename = "recalibration_training_data.csv",

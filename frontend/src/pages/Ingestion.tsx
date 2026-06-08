@@ -6,7 +6,7 @@ import {
   FileCode, Database, Box, AlertTriangle, ShieldCheck,
   Plug, X, Loader2, Trash2, Check, ChevronsUpDown,
 } from "lucide-react";
-import { configureIngestionVariables, loadSamples, removeIngestionFile, runAgent, uploadFile } from "@/services/api";
+import { checkSession, configureIngestionVariables, loadSamples, removeIngestionFile, runAgent, uploadFile } from "@/services/api";
 import { useSession, usePersistedState } from "@/contexts/session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -561,6 +561,40 @@ export default function Ingestion() {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [sessionId, devDataLoaded, targetVariable, outcomeVariable]);
+
+  // Backfill model feature count when localStorage has stale upload metadata.
+  useEffect(() => {
+    if (!sessionId || !loadedFiles.model?.model_class) return;
+    if (loadedFiles.model.feature_count != null && loadedFiles.model.feature_count > 0) return;
+
+    let cancelled = false;
+    void checkSession(sessionId)
+      .then((data) => {
+        if (cancelled) return;
+        const featureCount = data.model_meta?.feature_count ?? data.model_feature_count;
+        if (!featureCount || featureCount <= 0) return;
+        setLoadedFiles((prev) => {
+          if (!prev.model || (prev.model.feature_count != null && prev.model.feature_count > 0)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            model: {
+              ...prev.model,
+              ...data.model_meta,
+              feature_count: featureCount,
+            },
+          };
+        });
+      })
+      .catch(() => {
+        // Session validation happens elsewhere; ignore transient errors here.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, loadedFiles.model?.model_class, loadedFiles.model?.feature_count, setLoadedFiles]);
 
   // Block forward progress if new_data has a hard schema mismatch with dev_data
   const newDataCheck = loadedFiles.new_data?.schema_check;

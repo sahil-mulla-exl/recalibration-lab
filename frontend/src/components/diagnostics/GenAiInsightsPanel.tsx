@@ -136,10 +136,12 @@ export function useParsedGenAiInsight(insight?: GenAiInsightBlock | null): Parse
 export function GenAiTabSummary({
   insight,
   title = "AI summary",
+  bullets: bulletsOverride,
   className = "",
 }: {
   insight?: GenAiInsightBlock | null;
   title?: string;
+  bullets?: string[];
   className?: string;
 }) {
   const resolved = resolveInsightBody(insight);
@@ -162,9 +164,11 @@ export function GenAiTabSummary({
   }
 
   const bullets =
-    parsed?.tabSummaryBullets?.length
-      ? parsed.tabSummaryBullets
-      : formatInsightParagraphs(parsed?.rawText || parsed?.tabSummary || resolved.text, 4);
+    bulletsOverride?.length
+      ? bulletsOverride
+      : parsed?.tabSummaryBullets?.length
+        ? parsed.tabSummaryBullets
+        : formatInsightParagraphs(parsed?.rawText || parsed?.tabSummary || resolved.text, 4);
   if (!bullets.length) {
     const fallback = resolved.text.replace(/\s+/g, " ").trim();
     if (!fallback) return null;

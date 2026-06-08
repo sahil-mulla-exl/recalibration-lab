@@ -11,7 +11,11 @@ export interface GovernanceConfig {
   iv?: { significant_decline: number; weakened_decline: number };
   missing?: { flag_delta_pp: number; critical_delta_pp: number };
   performance?: { auc_material_drop_pp: number; auc_moderate_drop_pp: number; ks_material_drop_pp: number };
-  shap?: { jaccard_min: number; rank_shift_min_positions: number; mass_drop_pp: number };
+  shap?: {
+    feature_set_overlap_min: number;
+    rank_shift_min_positions: number;
+    mass_drop_pp: number;
+  };
 }
 
 export interface DiagnosticDecisionPayload {

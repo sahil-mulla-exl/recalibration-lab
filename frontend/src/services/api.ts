@@ -15,6 +15,21 @@ async function apiFetch<T = unknown>(path: string, options?: RequestInit): Promi
 // ── Session ──────────────────────────────────────────────────────────────────
 export const initSession = () => apiFetch<{ session_id: string }>("/session/init", { method: "POST" });
 
+export interface SessionCheckResponse {
+  session_id: string;
+  ok: boolean;
+  model_features?: string[];
+  model_feature_count?: number;
+  model_meta?: {
+    model_class?: string;
+    feature_count?: number;
+    n_estimators?: number;
+  };
+}
+
+export const checkSession = (session_id: string) =>
+  apiFetch<SessionCheckResponse>(`/session/${session_id}`);
+
 // ── Inventory ─────────────────────────────────────────────────────────────────
 export type OptimizationMethod = "random" | "bayesian" | "grid";
 

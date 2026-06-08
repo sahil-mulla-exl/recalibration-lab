@@ -67,3 +67,72 @@ export function cohortRocFromReport(
   }
   return undefined;
 }
+
+export type RocPoint = { fpr: number; tpr: number };
+
+function ensureRocEndpoints(points: RocPoint[]): RocPoint[] {
+  if (!points.length) return [
+    { fpr: 0, tpr: 0 },
+    { fpr: 1, tpr: 1 },
+  ];
+  const out = [...points];
+  const first = out[0];
+  if (first.fpr > 0 || first.tpr > 0) out.unshift({ fpr: 0, tpr: 0 });
+  const last = out[out.length - 1];
+  if (last.fpr < 1 || last.tpr < 1) out.push({ fpr: 1, tpr: 1 });
+  return out;
+}
+
+/** Downsample ROC while keeping (fpr, tpr) pairs aligned and preserving endpoints. */
+export function downsampleRocPoints(
+  roc?: { fpr: number[]; tpr: number[] },
+  target = 50,
+): RocPoint[] {
+  if (!roc?.fpr?.length) return [];
+  const pairs: RocPoint[] = roc.fpr.map((fpr, i) => ({
+    fpr: Number(fpr),
+    tpr: Number(roc.tpr?.[i] ?? 0),
+  }));
+  if (pairs.length <= target) return ensureRocEndpoints(pairs);
+  const step = Math.max(1, Math.floor(pairs.length / target));
+  const sampled = pairs.filter((_, i) => i % step === 0);
+  return ensureRocEndpoints(sampled);
+}
+
+function interpolateRocTpr(points: RocPoint[], fpr: number): number | null {
+  if (!points.length) return null;
+  if (fpr <= points[0].fpr) return points[0].tpr;
+  const last = points[points.length - 1];
+  if (fpr >= last.fpr) return last.tpr;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    if (fpr <= curr.fpr) {
+      const span = curr.fpr - prev.fpr;
+      if (span <= 0) return curr.tpr;
+      const weight = (fpr - prev.fpr) / span;
+      return prev.tpr + weight * (curr.tpr - prev.tpr);
+    }
+  }
+  return last.tpr;
+}
+
+/** Merge multiple ROC series on a shared false-positive-rate grid (avoids index misalignment). */
+export function mergeRocSeriesForChart(
+  series: Array<{ key: string; points: RocPoint[] }>,
+): Array<Record<string, number | null>> {
+  const fprSet = new Set<number>([0, 1]);
+  for (const entry of series) {
+    for (const point of entry.points) {
+      if (Number.isFinite(point.fpr)) fprSet.add(point.fpr);
+    }
+  }
+  const fprs = [...fprSet].sort((a, b) => a - b);
+  return fprs.map((fpr) => {
+    const row: Record<string, number | null> = { fpr };
+    for (const entry of series) {
+      row[entry.key] = interpolateRocTpr(entry.points, fpr);
+    }
+    return row;
+  });
+}

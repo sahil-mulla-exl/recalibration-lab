@@ -134,6 +134,23 @@ def gateway_enabled() -> bool:
     return gateway_credentials_configured()
 
 
+def normalize_azure_openai_endpoint(
+    provider: str,
+    api_base: Optional[str],
+    api_version: Optional[str],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """
+    Azure AI Foundry OpenAI-compatible ``/openai/v1`` bases must use the OpenAI
+    provider in LiteLLM. Classic ``*.openai.azure.com`` resources use ``azure``.
+    """
+    if not api_base:
+        return provider, api_base, api_version
+    base = api_base.rstrip("/")
+    if provider.lower().startswith("azure") and "/openai/v1" in base:
+        return "openai", base, None
+    return provider, api_base, api_version
+
+
 def direct_azure_chat_env() -> Dict[str, Optional[str]]:
     """Shared direct-Azure chat credentials/endpoints from env."""
     return {
@@ -214,6 +231,10 @@ class LitellmUsageConfig:
         elif not api_key and provider.startswith("azure"):
             api_key = os.getenv("LLM_EMBEDDING_API_KEY") or os.getenv("LLM_API_KEY")
 
+        provider, api_base, api_version = normalize_azure_openai_endpoint(
+            provider, api_base, api_version
+        )
+
         normalized_model = model
         if model_normalizer:
             normalized_model = model_normalizer(provider, model)
@@ -261,6 +282,10 @@ class LitellmUsageConfig:
             api_base = api_base or fallback_map.get("api_base")
             api_key = api_key or fallback_map.get("api_key")
             api_version = api_version or fallback_map.get("api_version")
+
+        provider, api_base, api_version = normalize_azure_openai_endpoint(
+            provider, api_base, api_version
+        )
 
         cleaned_defaults = {
             key.lower(): _parse_env_value(value)
@@ -318,7 +343,7 @@ class LitellmUsageConfig:
             return False
         if self.route == "gateway":
             return bool(self.model and self.api_key and self.api_base)
-        if self.provider.startswith("azure"):
+        if self.provider.startswith("azure") or self.provider == "openai":
             return bool(self.model and self.api_key and self.api_base)
         return bool(self.model)
 

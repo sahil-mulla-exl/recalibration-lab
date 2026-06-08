@@ -330,13 +330,29 @@ class RecalibrationAgent(Agent):
         recal_train_frame: pd.DataFrame | None = None
 
         if use_processed_train:
-            train_proc = pd.read_parquet(processed_dev_path)
-            if processed_new_path and os.path.exists(processed_new_path):
-                new_proc = pd.read_parquet(processed_new_path)
-                train_proc = pd.concat([train_proc, new_proc], ignore_index=True)
+            if processed_recal_train_path and os.path.exists(processed_recal_train_path):
+                train_proc = pd.read_parquet(processed_recal_train_path)
                 await self.log(
-                    f"Appended New Train Data: {len(new_proc):,} rows → combined training set {len(train_proc):,} rows"
+                    f"Using recalibration training artifact ({len(train_proc):,} rows): {processed_recal_train_path}"
                 )
+            else:
+                from backend.app.utils.processed_paths import ensure_recalibration_training_artifact
+
+                built_path = ensure_recalibration_training_artifact(self.session_id, session)
+                if built_path and os.path.exists(built_path):
+                    train_proc = pd.read_parquet(built_path)
+                    processed_recal_train_path = built_path
+                    await self.log(
+                        f"Built recalibration training artifact ({len(train_proc):,} rows): {built_path}"
+                    )
+                else:
+                    train_proc = pd.read_parquet(processed_dev_path)
+                    if processed_new_path and os.path.exists(processed_new_path):
+                        new_proc = pd.read_parquet(processed_new_path)
+                        train_proc = pd.concat([train_proc, new_proc], ignore_index=True)
+                        await self.log(
+                            f"Appended New Train Data: {len(new_proc):,} rows → combined training set {len(train_proc):,} rows"
+                        )
             train_rows = len(train_proc)
             train_features = [c for c in available_features if c in train_proc.columns]
             if not train_features:
@@ -447,7 +463,7 @@ class RecalibrationAgent(Agent):
                 if high_card_drops:
                     available_features = [c for c in available_features if c not in high_card_drops]
                     oot_feature_cols = [c for c in available_features if c in oot_df.columns]
-                    train_df = dev_df[available_features + [dev_outcome_col]].copy()
+                    train_df = combined[available_features + [dev_outcome_col]].copy()
                     oot_df = oot_df[oot_feature_cols + [hold_outcome_col]].copy()
                     await self.log(
                         f"Fast mode: dropped {len(high_card_drops)} high-cardinality categorical feature(s) "

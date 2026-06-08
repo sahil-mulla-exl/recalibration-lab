@@ -48,6 +48,16 @@ export function GovernanceBanner({ governance }: GovernanceBannerProps) {
 
       )}
 
+      {governance.shap && (
+
+        <Badge variant="outline" className="bg-white dark:bg-slate-900">
+
+          Top feature set overlap &gt; {(governance.shap.feature_set_overlap_min * 100).toFixed(0)}%
+
+        </Badge>
+
+      )}
+
     </Card>
 
   );

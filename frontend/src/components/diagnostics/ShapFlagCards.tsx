@@ -12,9 +12,10 @@ export function ShapFlagCards({ flags }: ShapFlagCardsProps) {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
       <Card className="p-3">
-        <div className="text-xs text-muted-foreground uppercase">Feature set overlap</div>
-        <div className="text-lg font-semibold">{Number(flags.jaccard ?? 0).toFixed(3)}</div>
-        <div className="text-xs text-muted-foreground mt-1">Jaccard similarity of top features</div>
+        <div className="text-xs text-muted-foreground uppercase">Top feature set overlap %</div>
+        <div className="text-lg font-semibold">
+          {(Number(flags.feature_set_overlap ?? flags.jaccard ?? 0) * 100).toFixed(1)}%
+        </div>
       </Card>
       <Card className="p-3">
         <div className="text-xs text-muted-foreground uppercase">Rank order shift</div>

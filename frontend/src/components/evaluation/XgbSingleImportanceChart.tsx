@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
-import { cartesianGrid, chartTooltipProps, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartTooltipProps, formatChartValue, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
 
 export type XgbImportanceBarRow = {
   feature: string;
@@ -19,7 +19,7 @@ type XgbSingleImportanceChartProps = {
 
 export function XgbSingleImportanceChart({ rows, color, fill, title }: XgbSingleImportanceChartProps) {
   const theme = useChartTheme();
-  const fmt4 = (v: number | string) => Number(v).toFixed(4);
+  const fmt = formatChartValue;
   const labels = rows.map((r) => r.feature);
   const yWidth = featureLabelWidth(labels);
   const height = chartHeightForFeatureRows(rows.length);
@@ -34,7 +34,7 @@ export function XgbSingleImportanceChart({ rows, color, fill, title }: XgbSingle
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} layout="vertical" margin={horizontalBarMargin(yWidth, 4)}>
           <CartesianGrid {...cartesianGrid(theme, { horizontal: false })} />
-          <XAxis {...chartXAxis(theme, "Importance", { type: "number", tickFormatter: fmt4 })} />
+          <XAxis {...chartXAxis(theme, "Importance", { type: "number", tickFormatter: fmt })} />
           <YAxis
             {...chartYAxis(theme, undefined, {
               type: "category",
@@ -43,7 +43,7 @@ export function XgbSingleImportanceChart({ rows, color, fill, title }: XgbSingle
               interval: 0,
             })}
           />
-          <Tooltip formatter={(value) => fmt4(value as number)} {...chartTooltipProps(theme)} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme)} />
           <Bar
             dataKey="importance"
             fill={fill}

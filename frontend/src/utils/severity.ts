@@ -4,7 +4,7 @@ const defaultGov: GovernanceConfig = {
   csi: { stable_max: 0.1, medium_max: 0.25 },
   psi_score: { stable_max: 0.1, medium_max: 0.25 },
   iv: { significant_decline: -0.1, weakened_decline: -0.03 },
-  missing: { flag_delta_pp: 5, critical_delta_pp: 10 },
+  missing: { flag_delta_pp: 4, critical_delta_pp: 10 },
 };
 
 function merged(gov?: GovernanceConfig): GovernanceConfig {

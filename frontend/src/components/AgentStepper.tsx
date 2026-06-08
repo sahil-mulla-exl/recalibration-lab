@@ -71,8 +71,8 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "score_oot_with_original", name: `Score ${HOLD} and ${NEW_VAL} (champion + recalibrated)`, status: "pending" },
     { id: "compute_performance_metrics", name: "Compute performance metrics (AUC, KS, lift)", status: "pending" },
     { id: "compute_variable_experience", name: "Compute variable importance comparison", status: "pending" },
-    { id: "compute_score_migration", name: "Score decile migration (champion vs recalibrated)", status: "pending" },
-    { id: "compute_top_decile_overlap", name: "Compute top-decile customer overlap (Jaccard)", status: "pending" },
+    { id: "compute_score_migration", name: "Score decile migration (existing vs recalibrated)", status: "pending" },
+    { id: "compute_top_decile_overlap", name: "Compute top-decile customer overlap", status: "pending" },
     { id: "assemble_export_artifacts", name: "Assemble export artifacts", status: "pending" },
     { id: "generate_ai_insights", name: "Generate AI evaluation insights", status: "pending" },
   ],
@@ -98,7 +98,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
     score_hold_data: `Score ${HOLD} when available.`,
     score_new_data_oos: `Score ${NEW_VAL} when available.`,
     predict_new_outcome: `Derive or attach outcome columns on ${NEW} and persist export paths on the session.`,
-    compare_to_original: `Compare freshly scored ${DEV} scores to bundled reference scores via Spearman correlation.`,
+    compare_to_original: `Compare freshly scored ${DEV} scores to bundled reference scores`,
     evaluate_threshold: "Apply the reproducibility threshold and set pass/fail verdict for the workflow gate.",
   },
   drift: {
@@ -106,7 +106,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
     compute_data_drift: `Compute PSI, CSI, missingness, cardinality, and target-rate drift between ${DEV} and ${NEW_VAL}.`,
     compute_concept_drift: `Compute IV, univariate Gini (raw variable AUC), and bivariate monotonicity (${DEV} vs ${NEW_VAL}).`,
     compute_performance_drift: `Compare ROC, KS, lift, and calibration between ${HOLD} and ${NEW_VAL}.`,
-    compute_interpretability: "Compute SHAP-style feature importance and partial dependence profiles where configured.",
+    compute_interpretability: "Compute SHAP-style feature importance, feature set overlap, and partial dependence profiles where configured.",
     assemble_report: "Merge all diagnostic signals, apply governance rules, and produce the recommendation verdict.",
   },
   recalibration: {
@@ -127,7 +127,7 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
     compute_score_migration:
       `On ${NEW_VAL}, assign each account to score deciles (1–10) for champion and recalibrated models, then summarize how deciles shift.`,
     compute_top_decile_overlap:
-      `Measure Jaccard overlap of top-decile accounts on ${NEW_VAL} between champion and recalibrated models.`,
+      `Measure overlap of top-decile accounts on ${NEW_VAL} between champion and recalibrated models.`,
     assemble_export_artifacts: "Package evaluation tables and charts for download/export.",
     generate_ai_insights:
       "Call the evaluation AI prompt with metric payloads and attach section insights to the evaluation report.",

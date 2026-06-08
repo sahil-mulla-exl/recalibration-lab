@@ -39,7 +39,9 @@ export default function DataProcessing() {
 
   const [, setAutoRunDrift] = usePersistedState<boolean>("rcl:autoRunDrift", false);
 
-  const [loadedFiles] = usePersistedState<Record<string, { feature_count?: number; target_rate?: number }>>("rcl:loadedFiles", {});
+  const [loadedFiles] = usePersistedState<
+    Record<string, { feature_count?: number; target_rate?: number }>
+  >("rcl:loadedFiles", {});
 
   const agentLaunchRef = useRef(false);
 
@@ -99,11 +101,7 @@ export default function DataProcessing() {
     ? "regression"
     : "classification";
 
-  const ingestionDevTargetRate = loadedFiles.dev_data?.target_rate;
-  const processedDevTargetRate =
-    problemType === "regression"
-      ? processingReport.dev_target_mean
-      : processingReport.dev_target_rate;
+  const targetLabel = problemType === "regression" ? "Target mean" : "Event rate";
   const formatTargetRate = (value: unknown) => {
     const num = Number(value);
     if (!Number.isFinite(num)) return "—";
@@ -246,37 +244,21 @@ export default function DataProcessing() {
 
               <div className="rounded-lg border border-border bg-muted/20 p-3">
 
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{INGESTION_DATASETS.dev_data.label} mean score</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {INGESTION_DATASETS.dev_data.label} {targetLabel.toLowerCase()}
+                </p>
 
-                <p className="font-mono font-semibold mt-1">{Number(processingReport.dev_score_mean || 0).toFixed(4)}</p>
-
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 p-3">
-
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{INGESTION_DATASETS.new_data.label} mean score</p>
-
-                <p className="font-mono font-semibold mt-1">{Number(processingReport.new_score_mean || 0).toFixed(4)}</p>
+                <p className="font-mono font-semibold mt-1">{formatTargetRate(loadedFiles.dev_data?.target_rate)}</p>
 
               </div>
 
               <div className="rounded-lg border border-border bg-muted/20 p-3">
 
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {INGESTION_DATASETS.dev_data.label} {problemType === "regression" ? "target mean (upload)" : "target rate (upload)"}
+                  {INGESTION_DATASETS.new_data.label} {targetLabel.toLowerCase()}
                 </p>
 
-                <p className="font-mono font-semibold mt-1">{formatTargetRate(ingestionDevTargetRate)}</p>
-
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 p-3">
-
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {INGESTION_DATASETS.dev_data.label} {problemType === "regression" ? "target mean (processed)" : "target rate (processed)"}
-                </p>
-
-                <p className="font-mono font-semibold mt-1">{formatTargetRate(processedDevTargetRate)}</p>
+                <p className="font-mono font-semibold mt-1">{formatTargetRate(loadedFiles.new_data?.target_rate)}</p>
 
               </div>
 
@@ -289,49 +271,29 @@ export default function DataProcessing() {
             />
 
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs">
-
-              {String(processingReport.new_outcome_source || "") === "observed" ? (
-
-                <>
-
-                  <p className="font-medium text-primary">
-
-                    {INGESTION_DATASETS.new_data.label} outcome variable (from upload):{" "}
-
-                    <span className="font-mono">{String(processingReport.new_outcome_column || outcomeVariable || "—")}</span>
-
-                  </p>
-
-                  <p className="text-muted-foreground mt-1">
-
-                    {problemType === "regression"
-
-                      ? `Observed outcome mean: ${Number(processingReport.new_outcome_mean ?? 0).toFixed(4)}`
-
-                      : `Observed positive rate: ${((Number(processingReport.new_outcome_rate ?? 0)) * 100).toFixed(1)}%`}
-
-                  </p>
-
-                </>
-
-              ) : (
-
-                <>
-
-                  <p className="font-medium text-primary">New data has no outcome column in upload</p>
-
-                  <p className="text-muted-foreground mt-1">
-
-                    Selected dev prediction column: <span className="font-mono">{outcomeVariable || "—"}</span>.
-
-                    Model-generated column: <span className="font-mono">predicted_outcome</span>.
-
-                  </p>
-
-                </>
-
+              <p className="font-medium text-primary">
+                {INGESTION_DATASETS.dev_data.label} target variable:{" "}
+                <span className="font-mono">
+                  {String(
+                    processingReport.dev_target_column ||
+                      processingReport.selected_target_column ||
+                      processingReport.processed_target_column ||
+                      targetVariable ||
+                      "—",
+                  )}
+                </span>
+              </p>
+              <p className="text-muted-foreground mt-1">
+                {problemType === "regression"
+                  ? `Outcome mean: ${formatTargetRate(loadedFiles.dev_data?.target_rate ?? processingReport.dev_target_mean)}`
+                  : `Event rate: ${formatTargetRate(loadedFiles.dev_data?.target_rate ?? processingReport.dev_target_rate)}`}
+              </p>
+              {String(processingReport.new_outcome_source || "") !== "observed" && (
+                <p className="text-muted-foreground mt-2 border-t border-primary/10 pt-2">
+                  {INGESTION_DATASETS.new_data.label} has no outcome column in upload — model-generated column:{" "}
+                  <span className="font-mono">predicted_outcome</span>.
+                </p>
               )}
-
             </div>
 
 

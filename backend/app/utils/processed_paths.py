@@ -72,6 +72,41 @@ def _write_parquet_safe(df: pd.DataFrame, path: str) -> None:
         safe.to_parquet(path, index=False)
 
 
+def build_recalibration_training_frame(session: dict) -> pd.DataFrame | None:
+    """Concatenate processed Existing Train + New Train for recalibration."""
+    dev_path = session.get("processed_dev_path")
+    new_path = session.get("processed_new_path")
+    if not dev_path or not os.path.exists(dev_path):
+        return None
+    frames = [pd.read_parquet(dev_path)]
+    if new_path and os.path.exists(new_path):
+        frames.append(pd.read_parquet(new_path))
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def ensure_recalibration_training_artifact(session_id: str, session: dict) -> str | None:
+    """Return parquet path for combined training data; build if missing."""
+    from backend.app.utils.session import update_session
+
+    parquet_path = session.get("processed_recal_train_path") or processed_parquet_path(
+        session_id, "recal_train"
+    )
+    if parquet_path and os.path.exists(parquet_path):
+        return parquet_path
+    df = build_recalibration_training_frame(session)
+    if df is None:
+        return None
+    parquet_path = persist_recalibration_training_parquet(df, session_id)
+    update_session(
+        session_id,
+        {
+            "processed_recal_train_path": parquet_path,
+            "recalibration_training_rows": int(len(df)),
+        },
+    )
+    return parquet_path
+
+
 def persist_recalibration_training_parquet(df: pd.DataFrame, session_id: str) -> str:
     """Fast parquet-only write for the combined recalibration training frame."""
     processed_data_dir()

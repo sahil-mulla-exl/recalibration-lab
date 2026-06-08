@@ -54,7 +54,10 @@ LLM_INSIGHTS_ENABLED=true
 
 # Primary: direct Azure OpenAI chat
 LLM_CHAT_API_KEY=...
-LLM_CHAT_API_BASE=https://<resource>.cognitiveservices.azure.com/openai/deployments/<deployment>/chat/completions
+# Classic Azure OpenAI resource:
+# LLM_CHAT_API_BASE=https://<resource>.openai.azure.com/
+# Azure AI Foundry OpenAI-compatible v1 API (auto-detected; uses OpenAI provider in LiteLLM):
+# AZURE_OPENAI_ENDPOINT=https://<project>.services.ai.azure.com/openai/v1
 LLM_CHAT_API_VERSION=2025-01-01-preview
 LLM_CHAT_MODEL=gpt-4.1-mini
 

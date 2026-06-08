@@ -101,7 +101,7 @@ def compute_shap_shift_flags(
     dev_importance: Dict[str, float],
     new_importance: Dict[str, float],
     top_k: int,
-    jaccard_min: float,
+    feature_set_overlap_min: float,
     rank_shift_min_positions: int,
     mass_drop_pp: float,
 ) -> Dict[str, Any]:
@@ -115,7 +115,7 @@ def compute_shap_shift_flags(
     dev_set = set(dev_top)
     new_set = set(new_top)
     union = max(len(dev_set | new_set), 1)
-    jaccard = float(len(dev_set & new_set) / union)
+    feature_set_overlap = float(len(dev_set & new_set) / union)
 
     new_positions = {name: idx for idx, (name, _) in enumerate(new_rank)}
     shifts = []
@@ -129,7 +129,7 @@ def compute_shap_shift_flags(
     mass_delta_pp = new_mass - dev_mass
 
     breaches = 0
-    if jaccard < jaccard_min:
+    if feature_set_overlap < feature_set_overlap_min:
         breaches += 1
     if major_shift > 0:
         breaches += 1
@@ -138,7 +138,7 @@ def compute_shap_shift_flags(
     composite = "action" if breaches >= 2 else ("watch" if breaches == 1 else "stable")
 
     return {
-        "jaccard": jaccard,
+        "feature_set_overlap": feature_set_overlap,
         "major_rank_shifts": major_shift,
         "topk_mass_dev_pct": dev_mass,
         "topk_mass_new_pct": new_mass,

@@ -5,7 +5,8 @@ from backend.app.utils.model_features import (
     load_model_feature_names_from_session,
     resolve_session_model_features,
 )
-from backend.app.utils.model_helpers import extract_model_feature_names
+from backend.app.utils.model_helpers import extract_model_feature_names, extract_model_metadata
+import numpy as np
 import pandas as pd
 
 
@@ -32,3 +33,14 @@ def test_extract_from_pkl(tmp_path) -> None:
     joblib.dump(model, path)
     names = extract_model_feature_names(joblib.load(path))
     assert names == ["feat_a", "feat_b"]
+
+
+def test_extract_model_metadata_counts_numpy_features() -> None:
+    model = XGBClassifier(n_estimators=5, verbosity=0)
+    X = np.random.rand(20, 7)
+    y = (X[:, 0] > 0.5).astype(int)
+    model.fit(X, y)
+    meta = extract_model_metadata(model)
+    assert meta["model_class"] == "XGBClassifier"
+    assert meta["feature_count"] == 7
+    assert meta["n_estimators"] == 5

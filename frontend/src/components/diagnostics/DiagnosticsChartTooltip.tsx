@@ -103,7 +103,7 @@ function formatEntry(
 
   const num = Number(value);
 
-  const display = Number.isFinite(num) ? num.toFixed(3) : String(value ?? "—");
+  const display = Number.isFinite(num) ? num.toFixed(1) : String(value ?? "—");
 
   return { display, seriesName: fallbackName };
 

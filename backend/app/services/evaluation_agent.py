@@ -45,8 +45,8 @@ class EvaluationAgent(Agent):
             {"id": "score_oot_with_original",     "name": EVAL_SCORE_HOLDOUTS},
             {"id": "compute_performance_metrics", "name": "Compute performance metrics (AUC, KS, lift)"},
             {"id": "compute_variable_experience", "name": "Compute variable importance comparison"},
-            {"id": "compute_score_migration",     "name": "Score decile migration (champion vs recalibrated)"},
-            {"id": "compute_top_decile_overlap",  "name": "Compute top-decile customer overlap (Jaccard)"},
+            {"id": "compute_score_migration",     "name": "Score decile migration (existing vs recalibrated)"},
+            {"id": "compute_top_decile_overlap",  "name": "Compute top-decile customer overlap"},
             {"id": "assemble_export_artifacts",   "name": "Assemble export artifacts"},
             {"id": "generate_ai_insights",        "name": "Generate AI evaluation insights"},
         ])
@@ -297,7 +297,7 @@ class EvaluationAgent(Agent):
                 "new_mae": new_mae if is_regression else None,
                 "orig_r2": orig_r2 if is_regression else None,
                 "new_r2": new_r2 if is_regression else None,
-                "jaccard": 0.0,  # updated after top-decile step for classification
+                "top_decile_overlap": 0.0,  # updated after top-decile step for classification
             },
         )
 
@@ -362,7 +362,9 @@ class EvaluationAgent(Agent):
                 champion_shap,
                 recal_shap,
                 top_k=10,
-                jaccard_min=float(shap_gov.get("jaccard_min", 0.80)),
+                feature_set_overlap_min=float(
+                    shap_gov.get("feature_set_overlap_min") or shap_gov.get("jaccard_min", 0.80)
+                ),
                 rank_shift_min_positions=int(shap_gov.get("rank_shift_min_positions", 3)),
                 mass_drop_pp=float(shap_gov.get("mass_drop_pp", 5.0)),
             )
@@ -473,7 +475,7 @@ class EvaluationAgent(Agent):
         await self.task_started("compute_top_decile_overlap")
         await asyncio.sleep(0.5)
         if is_regression:
-            jaccard = 0.0
+            top_decile_overlap = 0.0
             await self.log("Top-decile overlap skipped for regression workflows")
             await self.task_completed("compute_top_decile_overlap", "Skipped (not applicable for regression)")
         else:
@@ -482,10 +484,15 @@ class EvaluationAgent(Agent):
             new_top_idx = set(np.argsort(recalibrated_oos_scores)[-top10_pct:])
             intersection = len(orig_top_idx & new_top_idx)
             union = len(orig_top_idx | new_top_idx)
-            jaccard = intersection / max(union, 1)
-            await self.log(f"Top-decile Jaccard overlap: {jaccard:.4f} ({jaccard*100:.1f}%)")
+            top_decile_overlap = intersection / max(union, 1)
+            await self.log(
+                f"Top-decile customer overlap: {top_decile_overlap:.4f} ({top_decile_overlap * 100:.1f}%)"
+            )
             await self.log(f"Intersection: {intersection:,} | Union: {union:,}")
-            await self.task_completed("compute_top_decile_overlap", f"Jaccard = {jaccard:.3f} ({jaccard*100:.1f}%)")
+            await self.task_completed(
+                "compute_top_decile_overlap",
+                f"Overlap = {top_decile_overlap:.3f} ({top_decile_overlap * 100:.1f}%)",
+            )
         guardrails = _evaluate_policy_guardrails(
             problem_type=problem_type,
             drift_result=drift_result,
@@ -500,7 +507,7 @@ class EvaluationAgent(Agent):
                 "new_mae": new_mae if is_regression else None,
                 "orig_r2": orig_r2 if is_regression else None,
                 "new_r2": new_r2 if is_regression else None,
-                "jaccard": jaccard,
+                "top_decile_overlap": top_decile_overlap,
             },
         )
         await self.log(
@@ -529,7 +536,7 @@ class EvaluationAgent(Agent):
             "new_mae": round(new_mae, 6) if is_regression else None,
             "orig_r2": round(orig_r2, 6) if is_regression else None,
             "new_r2": round(new_r2, 6) if is_regression else None,
-            "jaccard": round(jaccard, 4),
+            "top_decile_overlap": round(top_decile_overlap, 4),
             "calibration_error_orig": round(float(orig_cal_error), 2),
             "calibration_error_new": round(float(new_cal_error), 2),
             "policy_guardrails": guardrails,
@@ -614,7 +621,7 @@ class EvaluationAgent(Agent):
             "new_cal_error": round(float(new_cal_error), 2),
             "top_decile_lift_orig": round(orig_lift[0]["lift"] if orig_lift else 0, 3),
             "top_decile_lift_new": round(new_lift[0]["lift"] if new_lift else 0, 3),
-            "jaccard": round(jaccard, 4),
+            "top_decile_overlap": round(top_decile_overlap, 4),
             "migration_matrix": migration_matrix.tolist(),
             "migration_pct": migration_pct.tolist(),
             "importance_table": importance_table,
@@ -635,9 +642,13 @@ class EvaluationAgent(Agent):
         await self.task_started("generate_ai_insights")
         await self.log("Generating AI evaluation insights…")
         try:
-            from backend.app.services.genai_insights_service import enrich_evaluation_result
+            from backend.app.services.genai_insights_service import (
+                emit_insight_route_logs,
+                enrich_evaluation_result,
+            )
 
             result["genai_insights"] = await enrich_evaluation_result(result)
+            await emit_insight_route_logs(self.log, result["genai_insights"])
             evaluation_insight = (result.get("genai_insights") or {}).get("evaluation") or {}
             insight_status = str(evaluation_insight.get("status") or "unknown")
             if insight_status == "ok":
@@ -766,12 +777,16 @@ def _cohort_payload(metrics: Dict[str, Any], source: str, rows: int) -> Dict[str
 def _compute_roc(y_true: np.ndarray, y_score: np.ndarray, n_points: int = 50) -> Dict:
     from sklearn.metrics import roc_curve
     fpr, tpr, _ = roc_curve(y_true, y_score)
-    # Downsample for payload size
     step = max(1, len(fpr) // n_points)
-    return {
-        "fpr": [round(float(x), 4) for x in fpr[::step]],
-        "tpr": [round(float(x), 4) for x in tpr[::step]],
-    }
+    fpr_out = [round(float(x), 4) for x in fpr[::step]]
+    tpr_out = [round(float(x), 4) for x in tpr[::step]]
+    if not fpr_out or fpr_out[0] != 0.0:
+        fpr_out.insert(0, 0.0)
+        tpr_out.insert(0, 0.0)
+    if fpr_out[-1] != 1.0 or tpr_out[-1] != 1.0:
+        fpr_out.append(1.0)
+        tpr_out.append(1.0)
+    return {"fpr": fpr_out, "tpr": tpr_out}
 
 
 def _evaluate_policy_guardrails(problem_type: str, drift_result: Dict[str, Any], comparison_metrics: Dict[str, Any]) -> Dict[str, Any]:
@@ -834,14 +849,18 @@ def _evaluate_policy_guardrails(problem_type: str, drift_result: Dict[str, Any],
             "critical",
             cal_err_new < 12.0,
         )
-        jaccard = float(comparison_metrics.get("jaccard") or 0.0)
+        top_decile_overlap = float(
+            comparison_metrics.get("top_decile_overlap")
+            or comparison_metrics.get("jaccard")
+            or 0.0
+        )
         register(
             "ranking.top_decile_overlap",
             "Top-decile overlap should stay above 0.30",
-            f"{jaccard:.3f}",
+            f"{top_decile_overlap:.3f}",
             ">= 0.300",
             "warning",
-            jaccard >= 0.30,
+            top_decile_overlap >= 0.30,
         )
     else:
         orig_rmse = float(comparison_metrics.get("orig_rmse") or 0.0)

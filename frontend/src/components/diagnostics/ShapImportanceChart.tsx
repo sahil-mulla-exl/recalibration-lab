@@ -7,13 +7,13 @@ import type { ShapImportanceRow } from "@/components/diagnostics/ShapImportanceT
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
-import { cartesianGrid, chartTooltipProps, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartTooltipProps, formatChartValue, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
 
 type ShapImportanceChartProps = { rows: ShapImportanceRow[] };
 
 export function ShapImportanceChart({ rows }: ShapImportanceChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
   const labels = rows.map((r) => r.feature);
   const yWidth = featureLabelWidth(labels);
   const height = chartHeightForFeatureRows(rows.length);
@@ -31,7 +31,7 @@ export function ShapImportanceChart({ rows }: ShapImportanceChartProps) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} layout="vertical" margin={horizontalBarMargin(yWidth, 4)}>
           <CartesianGrid {...cartesianGrid(theme, { horizontal: false })} />
-          <XAxis {...chartXAxis(theme, "Mean |SHAP|", { type: "number", tickFormatter: fmt3 })} />
+          <XAxis {...chartXAxis(theme, "Mean |SHAP|", { type: "number", tickFormatter: fmt })} />
           <YAxis
             {...chartYAxis(theme, undefined, {
               type: "category",
@@ -40,7 +40,7 @@ export function ShapImportanceChart({ rows }: ShapImportanceChartProps) {
               interval: 0,
             })}
           />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme)} />
           <Bar dataKey="devImportance" fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
           <Bar dataKey="newImportance" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
         </BarChart>

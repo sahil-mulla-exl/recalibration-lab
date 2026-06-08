@@ -67,6 +67,8 @@ const PHRASE_REPLACEMENTS: Array<[string, string]> = [
   ["GenAI insights", "AI insights"],
   ["GenAI", "AI"],
   ["LLM", "AI"],
+  ["Jaccard", "feature set overlap"],
+  ["jaccard", "feature set overlap"],
 ];
 
 /** Replace legacy dev/new/hold/OOS shorthand in agent logs and summaries. */

@@ -125,7 +125,10 @@ def extract_model_metadata(model_obj: Any) -> Dict[str, Any]:
         "model_class": type(model).__name__,
     }
 
-    if hasattr(model, "feature_names_in_"):
+    feature_names = extract_model_feature_names(model_obj)
+    if feature_names:
+        meta["feature_count"] = int(len(feature_names))
+    elif hasattr(model, "feature_names_in_"):
         try:
             meta["feature_count"] = int(len(model.feature_names_in_))
         except Exception:
@@ -137,6 +140,28 @@ def extract_model_metadata(model_obj: Any) -> Dict[str, Any]:
                 meta["feature_count"] = int(len(names))
         except Exception:
             pass
+    if "feature_count" not in meta and hasattr(model, "n_features_in_"):
+        try:
+            n = int(model.n_features_in_)
+            if n > 0:
+                meta["feature_count"] = n
+        except Exception:
+            pass
+    if "feature_count" not in meta and hasattr(model, "get_booster"):
+        try:
+            booster = model.get_booster()
+            if hasattr(booster, "num_features"):
+                n = int(booster.num_features())
+                if n > 0:
+                    meta["feature_count"] = n
+        except Exception:
+            pass
+    if "feature_count" not in meta and isinstance(model_obj, dict):
+        for key in ("feature_names", "features", "model_features", "feature_columns"):
+            raw = model_obj.get(key)
+            if isinstance(raw, (list, tuple)) and raw:
+                meta["feature_count"] = int(len(raw))
+                break
 
     if hasattr(model, "n_estimators"):
         try:

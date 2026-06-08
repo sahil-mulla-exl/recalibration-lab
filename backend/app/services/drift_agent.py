@@ -139,6 +139,23 @@ class DriftDiagnosticsAgent(Agent):
         return cols
 
     @staticmethod
+    def _pdp_feature_type(df: pd.DataFrame, col: str) -> str:
+        if col not in df.columns:
+            return "numeric"
+        series = df[col]
+        if (
+            pd.api.types.is_object_dtype(series)
+            or pd.api.types.is_categorical_dtype(series)
+            or pd.api.types.is_bool_dtype(series)
+        ):
+            return "categorical"
+        if pd.api.types.is_numeric_dtype(series):
+            uniq = int(series.nunique(dropna=True))
+            if 1 < uniq <= 12:
+                return "categorical"
+        return "numeric"
+
+    @staticmethod
     def _infer_numeric_features(df: pd.DataFrame, candidates: List[str]) -> List[str]:
         cols: List[str] = []
         for col in candidates:
@@ -258,7 +275,10 @@ class DriftDiagnosticsAgent(Agent):
         await self.log("Generating AI insights…")
         genai_insights: Dict[str, Any] = {}
         try:
-            from backend.app.services.genai_insights_service import enrich_diagnostics_report
+            from backend.app.services.genai_insights_service import (
+                emit_insight_route_logs,
+                enrich_diagnostics_report,
+            )
 
             genai_insights = await enrich_diagnostics_report(
                 {
@@ -271,6 +291,7 @@ class DriftDiagnosticsAgent(Agent):
                     "recommendation": recommendation,
                 }
             )
+            await emit_insight_route_logs(self.log, genai_insights)
         except Exception as exc:
             await self.log(f"AI insights skipped: {exc}")
         report = {
@@ -669,6 +690,7 @@ class DriftDiagnosticsAgent(Agent):
             "rob_new": rob_new,
             "roc_curve_dev": compute_roc_curve_points(dev_y, dev_scores, n=60),
             "roc_curve_new": compute_roc_curve_points(new_y, new_scores, n=60),
+            "ks_curve_dev": compute_ks_curve_points(dev_y, dev_scores, n=60),
             "ks_curve_new": compute_ks_curve_points(new_y, new_scores, n=60),
             "decile_rates_dev": dev_rates,
             "decile_rates_new": new_rates,
@@ -697,7 +719,10 @@ class DriftDiagnosticsAgent(Agent):
             dev_shap,
             new_shap,
             top_k=10,
-            jaccard_min=float(ctx.governance["shap"]["jaccard_min"]),
+            feature_set_overlap_min=float(
+                ctx.governance["shap"].get("feature_set_overlap_min")
+                or ctx.governance["shap"].get("jaccard_min", 0.80)
+            ),
             rank_shift_min_positions=int(ctx.governance["shap"]["rank_shift_min_positions"]),
             mass_drop_pp=float(ctx.governance["shap"]["mass_drop_pp"]),
         )
@@ -711,15 +736,7 @@ class DriftDiagnosticsAgent(Agent):
         pdp_features = ranked_features[:20]
         pdp_dev = compute_pdp_for_all_features(model, dev_X, pdp_features, n_grid=10)
         pdp_new = compute_pdp_for_all_features(model, new_X, pdp_features, n_grid=10)
-        feature_types = {
-            f: (
-                "categorical"
-                if f in self._infer_categorical_features_strict(ctx.train_df, [f])
-                or f in self._infer_categorical_features(ctx.train_df, [f])
-                else "numeric"
-            )
-            for f in pdp_features
-        }
+        feature_types = {f: self._pdp_feature_type(ctx.train_df, f) for f in pdp_features}
         return {
             "status": "ok",
             "shap_importance_dev": dev_shap,

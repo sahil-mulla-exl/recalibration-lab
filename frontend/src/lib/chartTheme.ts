@@ -271,4 +271,15 @@ export function categoryChartMargin(
   };
 }
 
+/** Single-decimal formatting for chart axes, tooltips, and labels. */
+export function formatChartValue(v: number | string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v ?? "—");
+  return n.toFixed(1);
+}
+
+export function formatChartPercent(v: number | string): string {
+  return `${formatChartValue(v)}%`;
+}
+
 export { chartTooltipProps, chartLegendProps, tooltipCursor } from "@/lib/chartTooltipProps";

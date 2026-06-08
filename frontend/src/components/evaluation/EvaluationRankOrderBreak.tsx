@@ -295,14 +295,14 @@ export function EvaluationRankOrderBreak({ report, theme, cohortColors }: Evalua
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={eventRateChartData} margin={chartMargin.xyTitles}>
                     <CartesianGrid {...cartesianGrid(theme)} />
-                    <XAxis {...chartXAxis(theme, "Decile (1 = lowest risk)", { dataKey: "label" })} />
+                    <XAxis {...chartXAxis(theme, "Decile", { dataKey: "label" })} />
                     <YAxis
                       {...chartYAxis(theme, "Event rate (%)", {
                         tickFormatter: (v) => `${Number(v).toFixed(1)}%`,
                       })}
                     />
                     <Tooltip
-                      formatter={(v: number) => [`${Number(v).toFixed(2)}%`, "Event rate"]}
+                      formatter={(v: number) => [`${Number(v).toFixed(1)}%`, "Event rate"]}
                       {...chartTooltipProps(theme)}
                     />
                     <Bar dataKey="eventRatePct" radius={[4, 4, 0, 0]} legendType="none" strokeWidth={theme.plot.barStrokeWidth}>

@@ -4,14 +4,14 @@ import { RocDiagonalReferenceLine } from "@/components/charts/RocDiagonalReferen
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
-import { cartesianGrid, chartMargin, chartTooltipProps, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartMargin, chartTooltipProps, formatChartValue, useChartTheme } from "@/lib/chartTheme";
 
 type RocPoint = { fpr: number; tpr: number };
 type RocChartProps = { dev: RocPoint[]; current: RocPoint[] };
 
 export function RocChart({ dev, current }: RocChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
 
   const merged = useMemo(() => {
     const len = Math.max(dev.length, current.length);
@@ -40,17 +40,17 @@ export function RocChart({ dev, current }: RocChartProps) {
               type: "number",
               dataKey: "fpr",
               domain: [0, 1],
-              tickFormatter: fmt3,
+              tickFormatter: fmt,
             })}
           />
           <YAxis
             {...chartYAxis(theme, "True positive rate", {
               type: "number",
               domain: [0, 1],
-              tickFormatter: fmt3,
+              tickFormatter: fmt,
             })}
           />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme, { cursor: "line" })} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme, { cursor: "line" })} />
           <RocDiagonalReferenceLine theme={theme} />
           <Line dataKey="devTpr" name={perfBaselineLabel()} stroke={theme.series.dev} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />
           <Line dataKey="newTpr" name={perfNewLabel()} stroke={theme.series.new} strokeWidth={theme.plot.lineStrokeWidth} dot={false} legendType="none" />

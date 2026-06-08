@@ -64,6 +64,7 @@ export default function RecalibrationProgress() {
     "rcl:dataProcessingResult",
     null,
   );
+  const [reproDone] = usePersistedState<boolean>("rcl:reproDone", false);
   const [optimizationInput] = usePersistedState<OptimizationInput>(
     "rcl:diagOptimizationInput",
     { hpMethod: "bayesian", cvFolds: 5, searchSpace: {} }
@@ -233,11 +234,13 @@ export default function RecalibrationProgress() {
     }
   };
 
+  const canDownloadRecalibrationDataset = Boolean(sessionId && reproDone);
+
   const exportRecalibrationDataset = async () => {
-    if (!sessionId) return;
+    if (!canDownloadRecalibrationDataset) return;
     try {
       setExportBusy(true);
-      await downloadRecalibrationTrainingData(sessionId);
+      await downloadRecalibrationTrainingData(sessionId!);
     } catch (err) {
       console.error(err);
     } finally {
@@ -343,11 +346,13 @@ export default function RecalibrationProgress() {
                     variant="outline"
                     size="sm"
                     className="h-8 gap-1.5 text-xs"
-                    disabled={exportBusy || !sessionId || !done}
+                    disabled={exportBusy || !canDownloadRecalibrationDataset}
                     title={
-                      done
-                        ? "Download combined Existing Train + New Train used for recalibration (includes new_score after run)"
-                        : "Run recalibration first to build the cached training dataset"
+                      !reproDone
+                        ? "Complete Data Processing first to build the recalibration training dataset"
+                        : done
+                          ? "Download combined Existing Train + New Train used for recalibration (includes new_score after run)"
+                          : "Download combined Existing Train + New Train that will be used for recalibration"
                     }
                     onClick={() => void exportRecalibrationDataset()}
                   >

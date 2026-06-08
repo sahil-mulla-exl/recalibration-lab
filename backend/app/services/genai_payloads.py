@@ -40,8 +40,23 @@ def _cardinality_flags(cardinality: Dict[str, Any]) -> List[Dict[str, Any]]:
     for feature, row in cardinality.items():
         if not isinstance(row, dict):
             continue
-        new_only = row.get("new_only") or row.get("new_categories") or []
-        lost = row.get("lost") or row.get("lost_categories") or []
+        train_cats = [str(c) for c in (row.get("train_categories") or []) if str(c) != "__NULL__"]
+        new_cats = [str(c) for c in (row.get("new_categories") or []) if str(c) != "__NULL__"]
+        train_set = set(train_cats)
+        new_set = set(new_cats)
+        new_only = (
+            row.get("new_only")
+            or row.get("new_category_names")
+            or sorted(new_set - train_set)
+        )
+        lost = (
+            row.get("lost")
+            or row.get("lost_categories")
+            or row.get("lost_category_names")
+            or sorted(train_set - new_set)
+        )
+        new_only = [str(c) for c in new_only if str(c) != "__NULL__"]
+        lost = [str(c) for c in lost if str(c) != "__NULL__"]
         if new_only or lost:
             flags.append(
                 {
@@ -343,7 +358,7 @@ def build_evaluation_payload(result: Dict[str, Any]) -> Dict[str, Any]:
             "d10_recalibrated_on_new_test": _lift_d10(oos_recal if isinstance(oos_recal, dict) else {}),
         },
         "importance": {
-            "jaccard": result.get("jaccard"),
+            "top_decile_overlap": result.get("top_decile_overlap") or result.get("jaccard"),
             "xgboost_importance_top10": _importance_top_rows(result.get("xgboost_importance"), 10),
             "shap_importance_top10": _importance_top_rows(result.get("shap_importance"), 10),
             "shap_flags": (

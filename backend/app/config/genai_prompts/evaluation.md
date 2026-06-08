@@ -49,7 +49,7 @@ FEATURE IMPORTANCE STABILITY (Native XGBoost + SHAP)
    - Flag any feature with major rank shift between Existing Model and Recalibrated models (5+ position move, or drop from top 10)
 
 2. SHAP IMPORTANCE STABILITY
-   - State Jaccard overlap, rank shift count, and importance concentration delta.
+   - State feature set overlap, rank shift count, and importance concentration delta.
    - One line explanatory verdict on the above.
 
 ================================================================

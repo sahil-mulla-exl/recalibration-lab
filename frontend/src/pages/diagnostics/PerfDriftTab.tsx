@@ -120,6 +120,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
     () => Number(perfForThreshold.classification_threshold ?? 0.3),
   );
   const [pdpFeature, setPdpFeature] = useState<string>("");
+  const [ksCohort, setKsCohort] = useState<"dev" | "new">("dev");
   const perf = (report.performance_drift ?? {}) as Record<string, any>;
   const interp = (report.interpretability ?? {}) as Record<string, any>;
   const problemType = normalizeProblemType(report.problem_type);
@@ -146,7 +147,23 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
       : null,
   ].filter((row): row is { metric: string; dev: number; current: number; higherIsBetter: boolean } => row != null);
 
-  const radarRows = discriminationMetricRows.map(({ metric, dev, current }) => ({ metric, dev, current }));
+  const radarRows = discriminationMetricRows
+    .filter((row) => row.metric !== "Calibration Error")
+    .map(({ metric, dev, current }) => ({ metric, dev, current }));
+  const ksCurvePoints = useMemo(() => {
+    const raw =
+      ksCohort === "dev"
+        ? (perf.ks_curve_dev ?? perf.ks_curve_new ?? [])
+        : (perf.ks_curve_new ?? []);
+    return toKsChartData(
+      raw as Array<{
+        population_pct: number;
+        cum_pos_pct: number;
+        cum_neg_pct: number;
+        ks?: number;
+      }>,
+    );
+  }, [perf, ksCohort]);
 
   if (!vis.hasAny) {
     return (
@@ -435,7 +452,7 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
                 {discriminationMetricRows.map(({ metric, dev, current, higherIsBetter }) => {
                   const delta = current - dev;
                   const deltaLabel = metric === "Calibration Error"
-                    ? `${delta >= 0 ? "+" : ""}${delta.toFixed(2)} pp`
+                    ? `${delta >= 0 ? "+" : ""}${(delta / 100).toFixed(4)}`
                     : `${delta >= 0 ? "+" : ""}${delta.toFixed(4)}`;
                   return (
                     <TableRow key={metric}>
@@ -478,17 +495,21 @@ export function PerfDriftTab({ report, selectedMetrics = [] }: PerfDriftTabProps
             {(vis.showKsCurve || vis.showCalibrationChart) && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
                 {vis.showKsCurve && (
-                  <ChartCard title="KS Curve" className="w-full min-w-0">
-                    <KsChart
-                      data={toKsChartData(
-                        (perf.ks_curve_new ?? []) as Array<{
-                          population_pct: number;
-                          cum_pos_pct: number;
-                          cum_neg_pct: number;
-                          ks?: number;
-                        }>,
-                      )}
-                    />
+                  <ChartCard
+                    title="KS Curve"
+                    className="w-full min-w-0"
+                    actions={(
+                      <select
+                        className="h-8 rounded border px-2 bg-background text-xs"
+                        value={ksCohort}
+                        onChange={(e) => setKsCohort(e.target.value as "dev" | "new")}
+                      >
+                        <option value="dev">{perfBaselineShortLabel()}</option>
+                        <option value="new">{perfNewShortLabel()}</option>
+                      </select>
+                    )}
+                  >
+                    <KsChart data={ksCurvePoints} />
                   </ChartCard>
                 )}
                 {vis.showCalibrationChart && (

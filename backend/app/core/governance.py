@@ -8,14 +8,14 @@ DEFAULT_GOVERNANCE: Dict[str, Dict[str, float]] = {
     "csi": {"stable_max": 0.10, "medium_max": 0.25},
     "psi_score": {"stable_max": 0.10, "medium_max": 0.25},
     "iv": {"significant_decline": -0.10, "weakened_decline": -0.03},
-    "missing": {"flag_delta_pp": 5.0, "critical_delta_pp": 10.0},
+    "missing": {"flag_delta_pp": 4.0, "critical_delta_pp": 10.0},
     "performance": {
         "auc_material_drop_pp": 5.0,
         "auc_moderate_drop_pp": 2.0,
         "ks_material_drop_pp": 5.0,
     },
     "shap": {
-        "jaccard_min": 0.80,
+        "feature_set_overlap_min": 0.80,
         "rank_shift_min_positions": 3.0,
         "mass_drop_pp": 5.0,
     },

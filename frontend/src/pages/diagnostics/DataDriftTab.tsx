@@ -66,7 +66,10 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
       train_categories?: string[];
       new_categories?: string[];
       new_only?: string[];
+      new_category_names?: string[];
       lost?: string[];
+      lost_categories?: string[];
+      lost_category_names?: string[];
       train_count?: number;
       new_count?: number;
       new_only_count?: number;
@@ -187,19 +190,81 @@ export function DataDriftTab({ report, selectedMetrics = [] }: DataDriftTabProps
   };
   const targetChartTraining = trainingRate;
   const targetChartNew = newRate;
-  const cardinalityRows = useMemo(
-    () =>
-      Object.entries(cardinality)
-        .map(([feature, vals]) => ({
+  const cardinalityRows = useMemo(() => {
+    const withoutNullToken = (cats: string[]) => cats.filter((c) => c !== "__NULL__");
+    const toCategoryList = (raw: unknown): string[] => {
+      if (raw == null) return [];
+      if (Array.isArray(raw)) return withoutNullToken(raw.map((c) => String(c)));
+      if (typeof raw === "string" || typeof raw === "number") return withoutNullToken([String(raw)]);
+      return [];
+    };
+    const diffNewOnly = (trainCats: string[], newCats: string[]) => {
+      const trainSet = new Set(withoutNullToken(trainCats));
+      return withoutNullToken(newCats).filter((c) => !trainSet.has(c));
+    };
+    const diffLost = (trainCats: string[], newCats: string[]) => {
+      const newSet = new Set(withoutNullToken(newCats));
+      return withoutNullToken(trainCats).filter((c) => !newSet.has(c));
+    };
+    const categoriesFromCsi = (details: {
+      categories?: string[];
+      train_pct?: number[];
+      new_pct?: number[];
+    }) => {
+      const cats = details.categories ?? [];
+      const trainPct = details.train_pct ?? [];
+      const newPct = details.new_pct ?? [];
+      const newOnly: string[] = [];
+      const lost: string[] = [];
+      cats.forEach((cat, idx) => {
+        if (String(cat) === "__NULL__") return;
+        const trainShare = Number(trainPct[idx] ?? 0);
+        const newShare = Number(newPct[idx] ?? 0);
+        const name = String(cat);
+        if (trainShare <= 1e-6 && newShare > 1e-6) newOnly.push(name);
+        if (newShare <= 1e-6 && trainShare > 1e-6) lost.push(name);
+      });
+      return { newOnly, lost };
+    };
+    return Object.entries(cardinality)
+      .map(([feature, vals]) => {
+        const trainCategories = toCategoryList(vals.train_categories);
+        const newCategories = toCategoryList(vals.new_categories);
+        let newOnly = diffNewOnly(trainCategories, newCategories);
+        let lost = diffLost(trainCategories, newCategories);
+
+        const explicitNew = toCategoryList(vals.new_only ?? vals.new_category_names);
+        const explicitLost = toCategoryList(vals.lost ?? vals.lost_categories ?? vals.lost_category_names);
+        if (explicitNew.length > 0) newOnly = explicitNew;
+        if (explicitLost.length > 0) lost = explicitLost;
+
+        const newOnlyCount = Number(vals.new_only_count ?? newOnly.length);
+        const lostCount = Number(vals.lost_count ?? lost.length);
+        if ((newOnlyCount > 0 && newOnly.length === 0) || (lostCount > 0 && lost.length === 0)) {
+          const csiDetails = (csi[feature]?.details ?? {}) as {
+            categories?: string[];
+            train_pct?: number[];
+            new_pct?: number[];
+          };
+          if ((csiDetails.categories ?? []).length > 0) {
+            const fromCsi = categoriesFromCsi(csiDetails);
+            if (newOnly.length === 0 && newOnlyCount > 0) newOnly = fromCsi.newOnly;
+            if (lost.length === 0 && lostCount > 0) lost = fromCsi.lost;
+          }
+        }
+
+        return {
           feature,
-          trainCount: Number(vals.train_count ?? (vals.train_categories ?? []).length),
-          newCount: Number(vals.new_count ?? (vals.new_categories ?? []).length),
-          newOnly: vals.new_only ?? [],
-          lost: vals.lost ?? [],
-        }))
-        .sort((a, b) => a.feature.localeCompare(b.feature)),
-    [cardinality],
-  );
+          trainCount: Number(vals.train_count ?? trainCategories.length),
+          newCount: Number(vals.new_count ?? newCategories.length),
+          newOnlyCount,
+          lostCount,
+          newOnly,
+          lost,
+        };
+      })
+      .sort((a, b) => a.feature.localeCompare(b.feature));
+  }, [cardinality, csi]);
 
   if (!hasDataDriftConfig && !showTarget) {
     return (

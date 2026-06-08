@@ -4,7 +4,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { ChartFrame } from "@/components/diagnostics/ChartFrame";
 import { chartXAxis, chartYAxis } from "@/lib/chartAxes";
 import { chartHeightForFeatureRows, featureLabelWidth } from "@/lib/chartLayout";
-import { cartesianGrid, chartTooltipProps, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
+import { cartesianGrid, chartTooltipProps, formatChartValue, horizontalBarMargin, useChartTheme } from "@/lib/chartTheme";
 
 type Row = { feature: string; devAuc: number; newAuc: number };
 type UnivariateAucChartProps = {
@@ -19,7 +19,7 @@ export function UnivariateAucChart({
   compareLabel = INGESTION_DATASETS.new_data_oos.label,
 }: UnivariateAucChartProps) {
   const theme = useChartTheme();
-  const fmt3 = (v: number | string) => Number(v).toFixed(3);
+  const fmt = formatChartValue;
   const labels = rows.map((r) => r.feature);
   const yWidth = featureLabelWidth(labels);
   const height = chartHeightForFeatureRows(rows.length, 32);
@@ -49,7 +49,7 @@ export function UnivariateAucChart({
             {...chartXAxis(theme, "Univariate AUC", {
               type: "number",
               domain: xDomain,
-              tickFormatter: fmt3,
+              tickFormatter: fmt,
             })}
           />
           <YAxis
@@ -60,7 +60,7 @@ export function UnivariateAucChart({
               interval: 0,
             })}
           />
-          <Tooltip formatter={(value) => fmt3(value as number)} {...chartTooltipProps(theme)} />
+          <Tooltip formatter={(value) => fmt(value as number)} {...chartTooltipProps(theme)} />
           <Bar dataKey="devAuc" fill={theme.series.trainFill} stroke={theme.series.train} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
           <Bar dataKey="newAuc" fill={theme.series.newFill} stroke={theme.series.new} strokeWidth={theme.plot.barStrokeWidth} legendType="none" />
         </BarChart>

@@ -707,7 +707,7 @@ class ReproducibilityAgent(Agent):
                 await self.log(f"Score comparison skipped: {exc}")
 
         update_session(self.session_id, {"reproducibility_result": result})
-        update_session(self.session_id, {
+        session_updates = {
             "processed_dev_path": processed_dev_path,
             "processed_new_path": processed_new_path,
             "processed_hold_path": processed_hold_path if has_hold else None,
@@ -724,6 +724,18 @@ class ReproducibilityAgent(Agent):
             "processed_new_outcome_column": new_outcome_col_used,
             "score_comparison_path": result.get("score_comparison_path"),
             "uploaded_model_feature_names": model_feature_cols,
-        })
+        }
+        update_session(self.session_id, session_updates)
+
+        from backend.app.utils.processed_paths import ensure_recalibration_training_artifact
+
+        recal_session = {**(get_session(self.session_id) or {}), **session_updates}
+        recal_train_path = ensure_recalibration_training_artifact(self.session_id, recal_session)
+        if recal_train_path:
+            await self.log(
+                f"Recalibration training dataset ready ({recal_session.get('recalibration_training_rows', '?')} rows): "
+                f"{recal_train_path}"
+            )
+
         await self.completed(result)
         return result

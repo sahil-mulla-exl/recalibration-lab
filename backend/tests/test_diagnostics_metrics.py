@@ -44,6 +44,8 @@ def test_cardinality_and_missing_drift() -> None:
     cardinality = compute_cardinality_drift(train, new)
     missing = compute_missing_rate_drift(train, new)
     assert "z" in cardinality["new_only"]
+    assert "z" in cardinality["new_category_names"]
+    assert "y" in cardinality["lost_category_names"]
     assert missing["delta_pp"] > 0
 
 

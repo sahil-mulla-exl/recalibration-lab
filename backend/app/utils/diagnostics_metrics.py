@@ -367,15 +367,19 @@ def compute_cardinality_drift(train_series: pd.Series, new_series: pd.Series) ->
     new_cats = sorted(set(new_series.fillna("__NULL__").astype(str).unique().tolist()))
     new_only = sorted(set(new_cats) - set(train_cats))
     lost = sorted(set(train_cats) - set(new_cats))
+    new_only_display = [c for c in new_only if c != "__NULL__"]
+    lost_display = [c for c in lost if c != "__NULL__"]
     return {
         "train_categories": train_cats,
         "new_categories": new_cats,
-        "new_only": new_only,
-        "lost": lost,
+        "new_only": new_only_display,
+        "lost": lost_display,
+        "new_category_names": new_only_display,
+        "lost_category_names": lost_display,
         "train_count": len(train_cats),
         "new_count": len(new_cats),
-        "new_only_count": len(new_only),
-        "lost_count": len(lost),
+        "new_only_count": len(new_only_display),
+        "lost_count": len(lost_display),
     }
 
 
