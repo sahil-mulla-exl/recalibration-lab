@@ -4,9 +4,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.app.core.config import LitellmUsageConfig, _normalize_bedrock_model
+from backend.app.core.config import (
+    LitellmUsageConfig,
+    _normalize_bedrock_model,
+    gateway_credentials_configured,
+)
 
 _REGISTRY_PATH = Path(__file__).resolve().parent.parent / "config" / "llm_model_mapping.json"
 _CACHE: Optional[Dict[str, Any]] = None
@@ -40,11 +44,7 @@ def list_models(usage: str = "chat") -> List[str]:
     return sorted(section.keys())
 
 
-def resolve_model_config(
-    model_id: str,
-    usage: str = "chat",
-) -> Optional[LitellmUsageConfig]:
-    """Resolve a registry model id to LitellmUsageConfig."""
+def _registry_entry(model_id: str, usage: str = "chat") -> Optional[Dict[str, Any]]:
     registry = load_registry()
     section = registry.get(usage, {})
     if not isinstance(section, dict):
@@ -54,13 +54,50 @@ def resolve_model_config(
         return None
     merged = dict(entry)
     merged.setdefault("model", model_id)
+    return merged
+
+
+def resolve_model_config(
+    model_id: str,
+    usage: str = "chat",
+    *,
+    use_gateway: bool = False,
+) -> Optional[LitellmUsageConfig]:
+    """Resolve a registry model id to LitellmUsageConfig (direct Azure/Bedrock by default)."""
+    entry = _registry_entry(model_id, usage)
+    if entry is None:
+        return None
     return LitellmUsageConfig.from_mapping(
         name=model_id,
         usage_type=usage,
         model_id=model_id,
-        mapping=merged,
+        mapping=entry,
         model_normalizer=_normalize_bedrock_model,
+        use_gateway=use_gateway,
     )
+
+
+def resolve_model_config_gateway(
+    model_id: str,
+    usage: str = "chat",
+) -> Optional[LitellmUsageConfig]:
+    """Gateway-routed variant of a registry model (requires gateway_model_id in mapping)."""
+    if not gateway_credentials_configured():
+        return None
+    entry = _registry_entry(model_id, usage)
+    if entry is None or not entry.get("gateway_model_id"):
+        return None
+    return resolve_model_config(model_id, usage, use_gateway=True)
+
+
+def resolve_model_routes(
+    model_id: str,
+    usage: str = "chat",
+) -> Tuple[Optional[LitellmUsageConfig], Optional[LitellmUsageConfig]]:
+    """Return (direct_config, gateway_config) for a registry model id."""
+    direct = resolve_model_config(model_id, usage, use_gateway=False)
+    gateway = resolve_model_config_gateway(model_id, usage)
+    return direct, gateway
 
 
 def models_with_tag(tag: str, usage: str = "chat") -> List[str]:

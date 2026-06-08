@@ -48,6 +48,7 @@ class EvaluationAgent(Agent):
             {"id": "compute_score_migration",     "name": "Score decile migration (champion vs recalibrated)"},
             {"id": "compute_top_decile_overlap",  "name": "Compute top-decile customer overlap (Jaccard)"},
             {"id": "assemble_export_artifacts",   "name": "Assemble export artifacts"},
+            {"id": "generate_ai_insights",        "name": "Generate AI evaluation insights"},
         ])
 
     async def run(self) -> Dict[str, Any]:
@@ -631,13 +632,32 @@ class EvaluationAgent(Agent):
             "log_path": log_path,
         }
 
+        await self.task_started("generate_ai_insights")
         await self.log("Generating AI evaluation insights…")
         try:
             from backend.app.services.genai_insights_service import enrich_evaluation_result
 
             result["genai_insights"] = await enrich_evaluation_result(result)
+            evaluation_insight = (result.get("genai_insights") or {}).get("evaluation") or {}
+            insight_status = str(evaluation_insight.get("status") or "unknown")
+            if insight_status == "ok":
+                await self.task_completed("generate_ai_insights", "AI evaluation summary generated")
+            elif insight_status == "skipped":
+                await self.task_completed(
+                    "generate_ai_insights",
+                    evaluation_insight.get("error") or "AI skipped (not configured)",
+                )
+            else:
+                await self.task_completed(
+                    "generate_ai_insights",
+                    evaluation_insight.get("error") or "AI insights unavailable",
+                )
         except Exception as exc:
             await self.log(f"AI evaluation insights skipped: {exc}")
+            result["genai_insights"] = {
+                "evaluation": {"status": "error", "text": "", "error": str(exc)},
+            }
+            await self.task_completed("generate_ai_insights", f"Skipped: {exc}")
 
         update_session(self.session_id, {
             "evaluation_result": result,

@@ -39,7 +39,7 @@ export default function DataProcessing() {
 
   const [, setAutoRunDrift] = usePersistedState<boolean>("rcl:autoRunDrift", false);
 
-  const [loadedFiles] = usePersistedState<Record<string, { feature_count?: number }>>("rcl:loadedFiles", {});
+  const [loadedFiles] = usePersistedState<Record<string, { feature_count?: number; target_rate?: number }>>("rcl:loadedFiles", {});
 
   const agentLaunchRef = useRef(false);
 
@@ -93,17 +93,22 @@ export default function DataProcessing() {
 
   const modelObjectFeatureCount = Number(loadedFiles.model?.feature_count ?? featuresUsedCount);
 
-
-
   const problemType = String(processingReport.problem_type || selectedModel?.problem_type || "classification")
-
     .toLowerCase()
-
     .startsWith("reg")
-
     ? "regression"
-
     : "classification";
+
+  const ingestionDevTargetRate = loadedFiles.dev_data?.target_rate;
+  const processedDevTargetRate =
+    problemType === "regression"
+      ? processingReport.dev_target_mean
+      : processingReport.dev_target_rate;
+  const formatTargetRate = (value: unknown) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    return problemType === "regression" ? num.toFixed(4) : `${(num * 100).toFixed(1)}%`;
+  };
 
 
 
@@ -255,6 +260,26 @@ export default function DataProcessing() {
 
               </div>
 
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {INGESTION_DATASETS.dev_data.label} {problemType === "regression" ? "target mean (upload)" : "target rate (upload)"}
+                </p>
+
+                <p className="font-mono font-semibold mt-1">{formatTargetRate(ingestionDevTargetRate)}</p>
+
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {INGESTION_DATASETS.dev_data.label} {problemType === "regression" ? "target mean (processed)" : "target rate (processed)"}
+                </p>
+
+                <p className="font-mono font-semibold mt-1">{formatTargetRate(processedDevTargetRate)}</p>
+
+              </div>
+
             </div>
 
             <ScoreMatchCard
@@ -271,7 +296,7 @@ export default function DataProcessing() {
 
                   <p className="font-medium text-primary">
 
-                    {INGESTION_DATASETS.dev_data.label} outcome variable (from upload):{" "}
+                    {INGESTION_DATASETS.new_data.label} outcome variable (from upload):{" "}
 
                     <span className="font-mono">{String(processingReport.new_outcome_column || outcomeVariable || "—")}</span>
 
@@ -281,9 +306,9 @@ export default function DataProcessing() {
 
                     {problemType === "regression"
 
-                      ? `Observed outcome mean: ${Number(processingReport.new_outcome_mean ?? processingReport.new_predicted_outcome_mean ?? 0).toFixed(4)}`
+                      ? `Observed outcome mean: ${Number(processingReport.new_outcome_mean ?? 0).toFixed(4)}`
 
-                      : `Observed positive rate: ${((Number(processingReport.new_outcome_rate ?? processingReport.new_predicted_outcome_rate ?? 0)) * 100).toFixed(2)}%`}
+                      : `Observed positive rate: ${((Number(processingReport.new_outcome_rate ?? 0)) * 100).toFixed(1)}%`}
 
                   </p>
 

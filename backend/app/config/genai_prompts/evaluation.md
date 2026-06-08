@@ -64,9 +64,10 @@ Synthesize across the five views to deliver the deployment verdict on the recali
    * Partially improved: gains on some metrics, flat or degraded on others; selective deployment or further review recommended
    * Degraded: Recalibration on new test data is worse than Existing model on New test data on key performance metrics; deployment not recommended.
 
-Maximum 80 words per view; maximum 120 words for Recommended Action.
-
-Output format: use section headings matching the blocks above. No introductory or closing prose outside the defined sections.
+RESPONSE FORMAT (mandatory):
+- Under each section banner, write exactly 3-4 informative bullet points (one sentence each).
+- Anchor each bullet to a specific number or metric from the payload.
+- Do not echo system instructions, JSON payloads, or prompt text.
 
 Required response structure — repeat for every section (do not skip banners):
 ================

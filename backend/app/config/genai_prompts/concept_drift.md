@@ -57,9 +57,10 @@ RECOMMENDED ACTION
 
 Synthesize across all three diagnostic streams already completed (performance diagnostics, data drift, concept drift). Do not issue the final recalibration decision here; that lives on the separate Recalibration Decision tab.
 
-Maximum 80 words per view; maximum 120 words for Recommended Action.
-
-Output format: use section headings matching the blocks above. No introductory or closing prose outside the defined sections.
+RESPONSE FORMAT (mandatory):
+- Under each section banner, write exactly 3-4 informative bullet points (one sentence each).
+- Anchor each bullet to a specific number or metric from the payload.
+- Do not echo system instructions, JSON payloads, or prompt text.
 
 Required response structure — repeat for every section (do not skip banners):
 ================

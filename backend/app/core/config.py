@@ -110,12 +110,46 @@ LLM_USE_GATEWAY: bool = (
     if _LLM_USE_GATEWAY_RAW is not None and str(_LLM_USE_GATEWAY_RAW).strip()
     else False
 )
+_LLM_GATEWAY_FALLBACK_RAW = os.getenv("LLM_GATEWAY_FALLBACK")
+LLM_GATEWAY_FALLBACK: bool = (
+    str(_LLM_GATEWAY_FALLBACK_RAW).strip().lower() in {"1", "true", "yes", "on"}
+    if _LLM_GATEWAY_FALLBACK_RAW is not None and str(_LLM_GATEWAY_FALLBACK_RAW).strip()
+    else False
+)
 LLM_GATEWAY_URL: Optional[str] = _env_clean("LLM_GATEWAY_URL")
 LLM_GATEWAY_VIRTUAL_KEY: Optional[str] = _env_clean("LLM_GATEWAY_VIRTUAL_KEY")
 
 
+def gateway_credentials_configured() -> bool:
+    return bool(LLM_GATEWAY_URL and LLM_GATEWAY_VIRTUAL_KEY)
+
+
+def gateway_only_mode() -> bool:
+    """Legacy: route all chat calls through the gateway (no direct Azure attempt)."""
+    return bool(LLM_USE_GATEWAY and gateway_credentials_configured() and not LLM_GATEWAY_FALLBACK)
+
+
 def gateway_enabled() -> bool:
-    return bool(LLM_USE_GATEWAY and LLM_GATEWAY_URL and LLM_GATEWAY_VIRTUAL_KEY)
+    """True when gateway credentials exist (fallback or gateway-only mode)."""
+    return gateway_credentials_configured()
+
+
+def direct_azure_chat_env() -> Dict[str, Optional[str]]:
+    """Shared direct-Azure chat credentials/endpoints from env."""
+    return {
+        "api_key": _env_clean("LLM_CHAT_API_KEY")
+        or _env_clean("AZURE_OPENAI_API_KEY")
+        or _env_clean("API_KEY"),
+        "api_base": _env_clean("LLM_CHAT_API_BASE")
+        or _env_clean("ENDPOINT")
+        or _env_clean("AZURE_OPENAI_ENDPOINT"),
+        "api_version": _env_clean("LLM_CHAT_API_VERSION")
+        or _env_clean("AZURE_API_VERSION")
+        or "2025-01-01-preview",
+        "model": _env_clean("LLM_CHAT_MODEL")
+        or _env_clean("AZURE_OPENAI_DEPLOYMENT_NAME")
+        or _env_clean("MODEL"),
+    }
 
 
 def _normalize_bedrock_model(provider: str, model: Optional[str]) -> Optional[str]:
@@ -143,6 +177,7 @@ class LitellmUsageConfig:
     api_key: Optional[str]
     api_version: Optional[str]
     defaults: Dict[str, Any] = field(default_factory=dict)
+    route: str = "direct"
 
     @classmethod
     def from_mapping(
@@ -152,6 +187,8 @@ class LitellmUsageConfig:
         model_id: str,
         mapping: Dict[str, Any],
         model_normalizer: Optional[Callable[[str, Optional[str]], Optional[str]]] = None,
+        *,
+        use_gateway: bool = False,
     ) -> "LitellmUsageConfig":
         provider = (mapping.get("provider") or "openai").strip().lower()
         model = mapping.get("model") or model_id
@@ -166,11 +203,16 @@ class LitellmUsageConfig:
                 defaults[key] = _parse_env_value(str(value))
 
         api_key = mapping.get("api_key")
-        if not api_key and provider.startswith("azure"):
-            if usage_type == "chat":
-                api_key = os.getenv("LLM_CHAT_API_KEY") or os.getenv("LLM_API_KEY")
-            elif usage_type == "embedding":
-                api_key = os.getenv("LLM_EMBEDDING_API_KEY") or os.getenv("LLM_API_KEY")
+        if usage_type == "chat":
+            azure_env = direct_azure_chat_env()
+            if not api_key and provider.startswith("azure"):
+                api_key = azure_env["api_key"]
+            if not api_base and provider.startswith("azure"):
+                api_base = azure_env["api_base"]
+            if not api_version and provider.startswith("azure"):
+                api_version = azure_env["api_version"]
+        elif not api_key and provider.startswith("azure"):
+            api_key = os.getenv("LLM_EMBEDDING_API_KEY") or os.getenv("LLM_API_KEY")
 
         normalized_model = model
         if model_normalizer:
@@ -185,9 +227,10 @@ class LitellmUsageConfig:
             api_key=api_key,
             api_version=api_version,
             defaults=defaults,
+            route="direct",
         )
         gateway_model_id = mapping.get("gateway_model_id")
-        if gateway_enabled() and gateway_model_id:
+        if use_gateway and gateway_model_id and gateway_credentials_configured():
             cfg.apply_gateway(LLM_GATEWAY_URL, LLM_GATEWAY_VIRTUAL_KEY, str(gateway_model_id))
         return cfg
 
@@ -239,7 +282,7 @@ class LitellmUsageConfig:
             api_version=api_version,
             defaults=cleaned_defaults,
         )
-        if gateway_enabled() and gateway_model_id_env:
+        if gateway_only_mode() and gateway_model_id_env and gateway_credentials_configured():
             cfg.apply_gateway(LLM_GATEWAY_URL, LLM_GATEWAY_VIRTUAL_KEY, str(gateway_model_id_env))
         return cfg
 
@@ -250,6 +293,7 @@ class LitellmUsageConfig:
         self.api_base = f"{gateway_url.rstrip('/')}/v1"
         self.api_key = virtual_key
         self.api_version = None
+        self.route = "gateway"
         return self
 
     def build_request_kwargs(self) -> Dict[str, Any]:
@@ -272,7 +316,7 @@ class LitellmUsageConfig:
     def is_ready(self) -> bool:
         if litellm is None:
             return False
-        if gateway_enabled():
+        if self.route == "gateway":
             return bool(self.model and self.api_key and self.api_base)
         if self.provider.startswith("azure"):
             return bool(self.model and self.api_key and self.api_base)
@@ -281,6 +325,7 @@ class LitellmUsageConfig:
 
 class Settings:
     LLM_USE_GATEWAY: bool = LLM_USE_GATEWAY
+    LLM_GATEWAY_FALLBACK: bool = LLM_GATEWAY_FALLBACK
     LLM_GATEWAY_URL: Optional[str] = LLM_GATEWAY_URL
     LLM_GATEWAY_VIRTUAL_KEY: Optional[str] = LLM_GATEWAY_VIRTUAL_KEY
 
@@ -317,13 +362,14 @@ class Settings:
         model_normalizer=_normalize_bedrock_model,
     )
 
-    def apply_provider_environment(self, provider: str) -> None:
+    def apply_provider_environment(self, provider: str, config: Optional[LitellmUsageConfig] = None) -> None:
         """Set provider-specific env vars before LiteLLM calls (Azure, etc.)."""
         provider_l = (provider or "").lower()
-        if provider_l.startswith("azure") and self.CHAT_LLM_CONFIG.api_key:
-            os.environ.setdefault("AZURE_API_KEY", self.CHAT_LLM_CONFIG.api_key)
-            if self.CHAT_LLM_CONFIG.api_base:
-                os.environ.setdefault("AZURE_API_BASE", self.CHAT_LLM_CONFIG.api_base)
+        active = config or self.CHAT_LLM_CONFIG
+        if provider_l.startswith("azure") and active.api_key:
+            os.environ.setdefault("AZURE_API_KEY", active.api_key)
+            if active.api_base:
+                os.environ.setdefault("AZURE_API_BASE", active.api_base)
 
 
 settings = Settings()

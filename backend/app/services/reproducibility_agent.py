@@ -28,6 +28,24 @@ from backend.app.config.agent_task_labels import (
 )
 
 
+def _cohort_target_stats(
+    df: pd.DataFrame,
+    target_col: str,
+    is_regression: bool,
+) -> tuple[Optional[float], Optional[float]]:
+    """Match ingestion API target_rate logic on a processed cohort."""
+    if target_col not in df.columns:
+        return None, None
+    numeric_target = pd.to_numeric(df[target_col], errors="coerce")
+    valid_ratio = float(numeric_target.notna().mean()) if len(numeric_target) else 0.0
+    if valid_ratio < 0.5:
+        return None, None
+    mean_val = round(float(numeric_target.mean()), 4)
+    if is_regression:
+        return mean_val, None
+    return None, mean_val
+
+
 class ReproducibilityAgent(Agent):
     def __init__(self, session_id: str, queue: asyncio.Queue):
         super().__init__("reproducibility", session_id, queue)
@@ -516,6 +534,9 @@ class ReproducibilityAgent(Agent):
             await self.failed(str(e))
             return {}
 
+        dev_target_mean, dev_target_rate = _cohort_target_stats(engineered_dev_df, target_col, is_regression)
+        new_target_mean, new_target_rate = _cohort_target_stats(engineered_new_df, target_col, is_regression)
+
         # Task 6: compare_to_original
         await self.task_started("compare_to_original")
         await asyncio.sleep(0.8)
@@ -619,8 +640,17 @@ class ReproducibilityAgent(Agent):
             "new_outcome_source": new_outcome_source,
             "new_outcome_rate": round(predicted_rate, 6) if predicted_rate is not None else None,
             "new_outcome_mean": round(predicted_mean, 6) if predicted_mean is not None else None,
-            "new_predicted_outcome_rate": round(predicted_rate, 6) if predicted_rate is not None else None,
-            "new_predicted_outcome_mean": round(predicted_mean, 6) if predicted_mean is not None else None,
+            "new_predicted_outcome_rate": round(predicted_rate, 6)
+            if predicted_rate is not None and new_outcome_source == "model_predicted"
+            else None,
+            "new_predicted_outcome_mean": round(predicted_mean, 6)
+            if predicted_mean is not None and new_outcome_source == "model_predicted"
+            else None,
+            "dev_target_rate": dev_target_rate,
+            "dev_target_mean": dev_target_mean,
+            "new_target_rate": new_target_rate,
+            "new_target_mean": new_target_mean,
+            "dev_target_column": target_col,
             "model_features_used": model_feature_cols,
             "model_features_used_count": len(model_feature_cols),
             "score_distribution": score_distribution,

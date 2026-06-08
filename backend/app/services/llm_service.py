@@ -5,9 +5,14 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.app.core.config import LitellmUsageConfig, gateway_enabled, settings
+from backend.app.core.config import (
+    LitellmUsageConfig,
+    gateway_credentials_configured,
+    gateway_only_mode,
+    settings,
+)
 from backend.app.core.llm_prompts import get_prompt_profile
-from backend.app.core.llm_registry import resolve_model_config
+from backend.app.core.llm_registry import resolve_model_config_gateway, resolve_model_routes
 from backend.app.core.llm_routing import candidates_for
 
 try:
@@ -26,7 +31,7 @@ def _build_litellm_kwargs(config: LitellmUsageConfig, overrides: Dict[str, Any])
 
 
 class LLMService:
-    """Context-routed chat completions. Disabled until LLM_ENABLED=true and credentials are set."""
+    """Context-routed chat completions with direct Azure primary and optional gateway fallback."""
 
     def __init__(self) -> None:
         self.chat_config: LitellmUsageConfig = settings.CHAT_LLM_CONFIG
@@ -34,22 +39,50 @@ class LLMService:
     def is_ready(self) -> bool:
         if completion is None:
             return False
-        if gateway_enabled():
+        if settings.CHAT_LLM_CONFIG.is_ready():
             return True
-        if self.chat_config.is_ready():
+        if gateway_credentials_configured():
             return True
         return any(
-            (cfg := resolve_model_config(mid)) is not None and cfg.is_ready()
+            (direct := self._build_config_for(mid, route="direct")) is not None and direct.is_ready()
+            or (
+                (gateway := self._build_config_for(mid, route="gateway")) is not None
+                and gateway.is_ready()
+            )
             for mid in candidates_for("default_chat")
         )
 
-    def _build_config_for(self, model_id: str) -> Optional[LitellmUsageConfig]:
-        resolved = resolve_model_config(model_id, usage="chat")
-        if resolved is not None:
-            return resolved
+    def _build_config_for(
+        self,
+        model_id: str,
+        *,
+        route: str = "direct",
+    ) -> Optional[LitellmUsageConfig]:
+        if route == "gateway":
+            return resolve_model_config_gateway(model_id, usage="chat")
+        direct, _gateway = resolve_model_routes(model_id, usage="chat")
+        if direct is not None:
+            return direct
         if model_id == settings.CHAT_LLM_CONFIG.model:
             return settings.CHAT_LLM_CONFIG
         return None
+
+    def _route_attempts_for_model(self, model_id: str) -> List[Tuple[str, LitellmUsageConfig]]:
+        direct, gateway = resolve_model_routes(model_id, usage="chat")
+        if direct is None and model_id == settings.CHAT_LLM_CONFIG.model:
+            direct = settings.CHAT_LLM_CONFIG
+
+        attempts: List[Tuple[str, LitellmUsageConfig]] = []
+        if gateway_only_mode():
+            if gateway is not None and gateway.is_ready():
+                attempts.append(("gateway", gateway))
+            return attempts
+
+        if direct is not None and direct.is_ready():
+            attempts.append(("direct-azure", direct))
+        if gateway is not None and gateway.is_ready():
+            attempts.append(("gateway-fallback", gateway))
+        return attempts
 
     @staticmethod
     def _sanitize_sampling_params(kwargs: Dict[str, Any]) -> None:
@@ -82,6 +115,19 @@ class LLMService:
         except (AttributeError, IndexError, TypeError):
             return ""
 
+    def _attempt_completion(
+        self,
+        cfg: LitellmUsageConfig,
+        overrides: Dict[str, Any],
+    ) -> Any:
+        settings.apply_provider_environment(cfg.provider, cfg)
+        request_kwargs = _build_litellm_kwargs(cfg, overrides)
+        self._sanitize_sampling_params(request_kwargs)
+        response = completion(**request_kwargs)
+        if self._response_is_empty(response):
+            raise RuntimeError("empty response")
+        return response
+
     def _execute_with_fallback(
         self,
         context: str,
@@ -90,65 +136,72 @@ class LLMService:
         if completion is None:
             raise RuntimeError("litellm is not installed")
 
-        gw_on = gateway_enabled()
         candidates = candidates_for(context)
         t0 = __import__("time").perf_counter()
         last_exc: Optional[BaseException] = None
 
         if not candidates:
-            config = settings.CHAT_LLM_CONFIG
-            if not config.is_ready():
-                raise RuntimeError(
-                    f"No routable candidates for context={context} and env chat config is incomplete"
-                )
-            settings.apply_provider_environment(config.provider)
-            request_kwargs = _build_litellm_kwargs(config, overrides)
-            self._sanitize_sampling_params(request_kwargs)
-            response = completion(**request_kwargs)
-            _router_logger.info(
-                "context=%s model=%s gateway=%s status=success source=env-fallback",
-                context,
-                config.model,
-                gw_on,
-            )
-            return response, config.model
+            attempts: List[Tuple[str, LitellmUsageConfig]] = []
+            if gateway_only_mode():
+                gw = resolve_model_config_gateway(settings.CHAT_LLM_CONFIG.model, usage="chat")
+                if gw is not None and gw.is_ready():
+                    attempts.append(("gateway", gw))
+            elif settings.CHAT_LLM_CONFIG.is_ready():
+                attempts.append(("direct-azure", settings.CHAT_LLM_CONFIG))
+            elif gateway_credentials_configured():
+                gw = resolve_model_config_gateway(settings.CHAT_LLM_CONFIG.model, usage="chat")
+                if gw is not None and gw.is_ready():
+                    attempts.append(("gateway-fallback", gw))
 
-        for attempt, model_id in enumerate(candidates, start=1):
-            cfg = self._build_config_for(model_id)
-            if cfg is None or not cfg.is_ready():
-                _router_logger.warning(
-                    "context=%s attempt=%d model=%s status=skipped",
-                    context,
-                    attempt,
-                    model_id,
-                )
-                continue
-            try:
-                settings.apply_provider_environment(cfg.provider)
-                request_kwargs = _build_litellm_kwargs(cfg, overrides)
-                self._sanitize_sampling_params(request_kwargs)
-                response = completion(**request_kwargs)
-                if self._response_is_empty(response):
-                    raise RuntimeError("empty response")
-                _router_logger.info(
-                    "context=%s attempt=%d model=%s gateway=%s status=success duration_ms=%.0f",
-                    context,
-                    attempt,
-                    model_id,
-                    gw_on,
-                    (__import__("time").perf_counter() - t0) * 1000,
-                )
-                self.chat_config = cfg
-                return response, model_id
-            except Exception as exc:
-                last_exc = exc
-                _router_logger.warning(
-                    "context=%s attempt=%d model=%s status=failed error=%s",
-                    context,
-                    attempt,
-                    model_id,
-                    type(exc).__name__,
-                )
+            for source, cfg in attempts:
+                try:
+                    response = self._attempt_completion(cfg, overrides)
+                    _router_logger.info(
+                        "context=%s model=%s route=%s status=success source=env",
+                        context,
+                        cfg.model,
+                        source,
+                    )
+                    self.chat_config = cfg
+                    return response, cfg.model
+                except Exception as exc:
+                    last_exc = exc
+                    _router_logger.warning(
+                        "context=%s route=%s status=failed error=%s",
+                        context,
+                        source,
+                        type(exc).__name__,
+                    )
+
+            raise RuntimeError(
+                f"No routable candidates for context={context} and env chat config is incomplete"
+            ) from last_exc
+
+        for model_id in candidates:
+            route_attempts = self._route_attempts_for_model(model_id)
+            for attempt_idx, (source, cfg) in enumerate(route_attempts, start=1):
+                try:
+                    response = self._attempt_completion(cfg, overrides)
+                    _router_logger.info(
+                        "context=%s attempt=%d model=%s route=%s status=success duration_ms=%.0f",
+                        context,
+                        attempt_idx,
+                        model_id,
+                        source,
+                        (__import__("time").perf_counter() - t0) * 1000,
+                    )
+                    self.chat_config = cfg
+                    return response, model_id
+                except Exception as exc:
+                    last_exc = exc
+                    _router_logger.warning(
+                        "context=%s attempt=%d model=%s route=%s status=failed error=%s",
+                        context,
+                        attempt_idx,
+                        model_id,
+                        source,
+                        type(exc).__name__,
+                    )
 
         raise RuntimeError(
             f"All candidate models failed for context={context}"
@@ -168,7 +221,10 @@ class LLMService:
         system_prompt: Optional[str] = None,
     ) -> str:
         if not self.is_ready():
-            return "LLM is not configured. Set LLM_USE_GATEWAY or LLM_CHAT_API_KEY in backend/.env"
+            return (
+                "AI is not configured. Set LLM_CHAT_API_KEY and LLM_CHAT_API_BASE "
+                "(or enable LLM_GATEWAY_FALLBACK with gateway credentials) in backend/.env"
+            )
 
         profile = get_prompt_profile(context)
         max_t = max_tokens if max_tokens is not None else profile.max_tokens

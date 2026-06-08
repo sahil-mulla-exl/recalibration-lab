@@ -74,6 +74,7 @@ const DEFAULT_AGENT_TASKS: Partial<Record<AgentName, TaskItem[]>> = {
     { id: "compute_score_migration", name: "Score decile migration (champion vs recalibrated)", status: "pending" },
     { id: "compute_top_decile_overlap", name: "Compute top-decile customer overlap (Jaccard)", status: "pending" },
     { id: "assemble_export_artifacts", name: "Assemble export artifacts", status: "pending" },
+    { id: "generate_ai_insights", name: "Generate AI evaluation insights", status: "pending" },
   ],
 };
 
@@ -128,6 +129,8 @@ const TASK_HELP: Partial<Record<AgentName, Record<string, string>>> = {
     compute_top_decile_overlap:
       `Measure Jaccard overlap of top-decile accounts on ${NEW_VAL} between champion and recalibrated models.`,
     assemble_export_artifacts: "Package evaluation tables and charts for download/export.",
+    generate_ai_insights:
+      "Call the evaluation AI prompt with metric payloads and attach section insights to the evaluation report.",
   },
 };
 

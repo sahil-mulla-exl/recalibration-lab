@@ -67,17 +67,25 @@ const CONFIG_GROUPS = [
   { section: "Concept Drift", options: ["Target Shift"] },
   {
     section: "Performance",
-    options: ["AUC", "KS", "GINI", "Calibration", "Lift/Gains", "RMSE", "MAE", "R2", "Feature Importance"],
+    options: ["AUC", "KS", "GINI", "Calibration", "Lift/Gains", "Feature Importance"],
   },
 ] as const;
 type ConfigOption = (typeof CONFIG_GROUPS)[number]["options"][number];
 
+const ALL_CONFIG_OPTIONS: ConfigOption[] = CONFIG_GROUPS.flatMap((group) => [...group.options]);
+
+function sanitizePicked(picked: ConfigOption[]): ConfigOption[] {
+  return picked.filter((opt) => ALL_CONFIG_OPTIONS.includes(opt));
+}
+
 function ConfigSelector({
   picked,
   onToggle,
+  onSetAll,
 }: {
   picked: ConfigOption[];
   onToggle: (option: ConfigOption) => void;
+  onSetAll: (options: ConfigOption[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -87,6 +95,23 @@ function ConfigSelector({
       options: group.options.filter((opt) => opt.toLowerCase().includes(normalizedQuery)),
     }))
     .filter((group) => group.options.length > 0);
+  const visibleOptions = filteredGroups.flatMap((group) => group.options);
+  const allVisibleSelected =
+    visibleOptions.length > 0 && visibleOptions.every((opt) => picked.includes(opt));
+  const someVisibleSelected = visibleOptions.some((opt) => picked.includes(opt));
+  const selectAllState: boolean | "indeterminate" = allVisibleSelected
+    ? true
+    : someVisibleSelected
+      ? "indeterminate"
+      : false;
+
+  const handleSelectAll = (checked: boolean | "indeterminate") => {
+    if (checked === true) {
+      onSetAll([...new Set([...picked, ...visibleOptions])]);
+      return;
+    }
+    onSetAll(picked.filter((opt) => !visibleOptions.includes(opt)));
+  };
 
   return (
     <Popover>
@@ -106,6 +131,12 @@ function ConfigSelector({
           placeholder="Search metrics..."
           className="mb-2 h-8 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-xs text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500"
         />
+        {visibleOptions.length > 0 && (
+          <label className="mb-2 flex items-center gap-2 border-b border-border pb-2 text-xs font-medium cursor-pointer">
+            <Checkbox checked={selectAllState} onCheckedChange={handleSelectAll} />
+            <span>Select all{normalizedQuery ? " (filtered)" : ""}</span>
+          </label>
+        )}
         <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
           {filteredGroups.length === 0 && (
             <p className="text-xs text-muted-foreground px-1 py-1">No matching metrics.</p>
@@ -168,7 +199,7 @@ export default function ModelInventory() {
   const handleSelect = async (model: ModelEntry) => {
     if (!sessionId) return;
     setSelecting(model.model_id);
-    const picked = selectedConfigs[model.model_id] || [];
+    const picked = sanitizePicked(selectedConfigs[model.model_id] || []);
     await selectModel(sessionId, model.model_id, model, picked);
     setSelectedModel(model as unknown as Record<string, string>);
     setStep(1);
@@ -197,9 +228,13 @@ export default function ModelInventory() {
     }
   };
 
+  const setConfigForModel = (modelId: string, options: ConfigOption[]) => {
+    setSelectedConfigs((prev) => ({ ...prev, [modelId]: sanitizePicked(options) }));
+  };
+
   const toggleConfig = (modelId: string, option: ConfigOption) => {
     setSelectedConfigs((prev) => {
-      const current = prev[modelId] || [];
+      const current = sanitizePicked(prev[modelId] || []);
       const next = current.includes(option)
         ? current.filter((x) => x !== option)
         : [...current, option];
@@ -310,7 +345,7 @@ export default function ModelInventory() {
             </thead>
             <tbody>
               {models.map((model, rowIndex) => {
-                const picked = selectedConfigs[model.model_id] || [];
+                const picked = sanitizePicked(selectedConfigs[model.model_id] || []);
                 return (
                   <tr
                     key={model.model_id}
@@ -318,7 +353,7 @@ export default function ModelInventory() {
                       rowIndex % 2 === 0 ? "bg-white dark:bg-gray-900" : "bg-gray-50 dark:bg-gray-800/50"
                     }`}
                   >
-                    <td className="px-2 py-2 truncate" title={model.model_name}>
+                    <td className="px-2 py-2 whitespace-normal break-words leading-snug" title={model.model_name}>
                       {model.model_name}
                     </td>
                     <td className="px-2 py-2 font-mono text-[11px] truncate" title={model.model_id}>
@@ -343,7 +378,11 @@ export default function ModelInventory() {
                       <OptimizationMethodBadge method={model.optimization_method} />
                     </td>
                     <td className="px-2 py-2 min-w-0">
-                      <ConfigSelector picked={picked} onToggle={(opt) => toggleConfig(model.model_id, opt)} />
+                      <ConfigSelector
+                        picked={picked}
+                        onToggle={(opt) => toggleConfig(model.model_id, opt)}
+                        onSetAll={(opts) => setConfigForModel(model.model_id, opts)}
+                      />
                     </td>
                     <td className="px-1.5 py-2">
                       <Button

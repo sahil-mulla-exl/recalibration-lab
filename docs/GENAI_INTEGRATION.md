@@ -52,14 +52,22 @@ In `backend/.env` (see `backend/.env.example`):
 # Enable/disable insight generation (default: true)
 LLM_INSIGHTS_ENABLED=true
 
-# One of:
-LLM_USE_GATEWAY=true
+# Primary: direct Azure OpenAI chat
+LLM_CHAT_API_KEY=...
+LLM_CHAT_API_BASE=https://<resource>.cognitiveservices.azure.com/openai/deployments/<deployment>/chat/completions
+LLM_CHAT_API_VERSION=2025-01-01-preview
+LLM_CHAT_MODEL=gpt-4.1-mini
+
+# Fallback: corporate LiteLLM gateway (used when direct Azure fails)
+LLM_GATEWAY_FALLBACK=true
 LLM_GATEWAY_URL=...
 LLM_GATEWAY_VIRTUAL_KEY=...
 
-# Or direct Azure / registry model:
-LLM_CHAT_API_KEY=...
+# Legacy gateway-only (skips direct Azure; default false)
+LLM_USE_GATEWAY=false
 ```
+
+**Routing order:** For each model candidate, the service tries **direct Azure first**, then **gateway fallback** (when `LLM_GATEWAY_FALLBACK=true`). Set `LLM_USE_GATEWAY=true` only if you want gateway-only (no direct Azure attempt).
 
 Optional: `GENAI_PROMPTS_DIR` — override prompt directory path.
 

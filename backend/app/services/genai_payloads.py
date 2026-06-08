@@ -275,6 +275,17 @@ def build_recalibration_decision_payload(report: Dict[str, Any]) -> Dict[str, An
     }
 
 
+def _importance_top_rows(importance: Any, n: int = 10) -> List[Dict[str, Any]]:
+    """Top-N comparison rows from evaluation importance payloads (dict with comparison list)."""
+    if not isinstance(importance, dict):
+        return []
+    comparison = importance.get("comparison")
+    if not isinstance(comparison, list):
+        return []
+    rows = [row for row in comparison if isinstance(row, dict)]
+    return rows[:n]
+
+
 def _cohort_metrics_block(cohort: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cohort, dict):
         return {}
@@ -333,8 +344,13 @@ def build_evaluation_payload(result: Dict[str, Any]) -> Dict[str, Any]:
         },
         "importance": {
             "jaccard": result.get("jaccard"),
-            "xgboost_importance_top10": (result.get("xgboost_importance") or [])[:10],
-            "shap_importance_top10": (result.get("shap_importance") or [])[:10],
+            "xgboost_importance_top10": _importance_top_rows(result.get("xgboost_importance"), 10),
+            "shap_importance_top10": _importance_top_rows(result.get("shap_importance"), 10),
+            "shap_flags": (
+                (result.get("shap_importance") or {}).get("shap_flags")
+                if isinstance(result.get("shap_importance"), dict)
+                else None
+            ),
         },
         "policy_guardrails": result.get("policy_guardrails"),
         "problem_type": result.get("problem_type"),

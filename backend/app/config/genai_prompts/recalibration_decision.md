@@ -28,9 +28,11 @@ RECOMMENDED ACTION
 2. REASONING ANCHOR
    - Cite the 2-3 strongest pieces of evidence driving the recommendation, named by stream (performance, data drift, or concept drift) and by specific feature or metric
 
-Maximum 150 words.
-
-Output format: state the recommended action label first, then reasoning anchor bullets. No introductory or closing prose outside the defined sections.
+RESPONSE FORMAT (mandatory):
+- Under each section banner, write exactly 3-4 informative bullet points (one sentence each).
+- State the recommended action label in the first bullet under RECOMMENDED ACTION.
+- Anchor each bullet to a specific metric or signal from the payload.
+- Do not echo system instructions, JSON payloads, or prompt text.
 
 Required response structure — repeat for every section (do not skip banners):
 ================

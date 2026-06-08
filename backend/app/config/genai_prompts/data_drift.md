@@ -67,9 +67,10 @@ CONCEPT DRIFT EVALUATION
    - Recommend as the immediate next step when target drift is material but feature drift is stable, or when top drifters are high-importance features
    - State as lower priority when both feature and target drift are low.
 
-Maximum 80 words for the recommendation section.
-
-Output format: insights in same order as specified, then Recommended Next Steps. No introductory or closing prose outside the defined sections. Maximum 80 words on insights per view.
+RESPONSE FORMAT (mandatory):
+- Under each section banner, write exactly 3-4 informative bullet points (one sentence each).
+- Anchor each bullet to a specific number or metric from the payload.
+- Do not echo system instructions, JSON payloads, or prompt text.
 
 Required response structure — repeat for every section (do not skip banners):
 ================

@@ -265,6 +265,30 @@ export default function Evaluation() {
   }, [sessionId, inventoryMetrics, performanceMetrics.length]);
 
   useEffect(() => {
+    if (!sessionId) return;
+    const localEval = (report?.genai_insights as Record<string, { status?: string; text?: string }> | undefined)
+      ?.evaluation;
+    if (localEval?.status === "ok" && localEval?.text) return;
+
+    fetch(`/api/evaluation/report?session_id=${encodeURIComponent(sessionId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data || typeof data !== "object" || "error" in data) return;
+        const serverEval = (data.genai_insights as Record<string, { status?: string; text?: string }> | undefined)
+          ?.evaluation;
+        if (!serverEval) return;
+        const shouldHydrate =
+          !localEval ||
+          (serverEval.status === "ok" && Boolean(serverEval.text) && localEval.status !== "ok");
+        if (!shouldHydrate) return;
+        setReport(data as Record<string, unknown>);
+        setEvaluationResult(data as Record<string, unknown>);
+        setDone(true);
+      })
+      .catch(() => {});
+  }, [sessionId, report?.genai_insights, setEvaluationResult]);
+
+  useEffect(() => {
     if (!report) return;
     const reportKey = metricsSelectionKey(
       ((report.selected_metrics as string[]) || []).filter((m) => performanceMetrics.includes(m as never)),
@@ -645,8 +669,16 @@ export default function Evaluation() {
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
 
           <GenAiTabSummary insight={evalGenAi} title="AI evaluation summary" className="mb-4" />
+          {!evalGenAi && (
+            <Card className="p-4 mb-4 border-slate-200 dark:border-slate-700">
+              <p className="text-sm text-muted-foreground">
+                AI insights are not on this report yet. Re-run the evaluation agent to execute the
+                &quot;Generate AI evaluation insights&quot; step.
+              </p>
+            </Card>
+          )}
           {showLlmDeployment ? (
-            <GenAiSectionInsight text={llmDeploymentInsight} className="mb-4" />
+            <GenAiSectionInsight text={llmDeploymentInsight} label="AI deployment recommendation" className="mb-4" />
           ) : (
             <RecommendBanner report={report} problemType={problemType} />
           )}

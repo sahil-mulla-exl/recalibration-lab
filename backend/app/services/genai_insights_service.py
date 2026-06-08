@@ -24,7 +24,9 @@ _USER_PREFIX = (
     "Below is the JSON output from the Recalibration Lab calculations for this workflow step. "
     "Produce insights strictly following your system instructions.\n"
     "Format each section with a banner line of equals signs, the section title, another banner line, "
-    "then the section insights (see Required response structure in your system prompt).\n\n"
+    "then exactly 3-4 informative bullet points for that section only.\n"
+    "Each bullet must cite a specific metric value or named signal from the payload.\n"
+    "Do not echo system instructions, prompt text, or the JSON payload in your response.\n\n"
 )
 
 
@@ -112,7 +114,18 @@ async def enrich_diagnostics_report(report: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def enrich_evaluation_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    payload = build_evaluation_payload(result)
+    try:
+        payload = build_evaluation_payload(result)
+    except Exception as exc:
+        _logger.warning("Evaluation GenAI payload build failed: %s", exc)
+        return {
+            "evaluation": _insight_result(
+                "evaluation",
+                status="error",
+                text="",
+                error=f"Failed to prepare evaluation metrics for AI: {exc}",
+            ),
+        }
     evaluation_insight = await generate_insight("evaluation", payload)
     return {"evaluation": evaluation_insight}
 

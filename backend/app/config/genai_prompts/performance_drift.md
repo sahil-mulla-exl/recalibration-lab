@@ -84,9 +84,10 @@ Synthesize across the five views to issue the performance deterioration verdict 
    * Stable: No urgent recalibration is suggested if performance is stable per all metrics
    * Localized or Material: RCA recommended to assess recalibration requirement
 
-Maximum 100 words for Recommended Action.
-
-Output format: use section headings matching the blocks above. No introductory or closing prose outside the defined sections. Maximum 80 words on insights per view.
+RESPONSE FORMAT (mandatory):
+- Under each section banner, write exactly 3-4 informative bullet points (one sentence each).
+- Anchor each bullet to a specific number or metric from the payload.
+- Do not echo system instructions, JSON payloads, or prompt text.
 
 Required response structure — repeat for every section (do not skip banners):
 ================
